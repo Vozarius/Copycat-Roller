@@ -82,6 +82,19 @@ class LayerMathTest {
         assertEquals(3, LayerMath.breakDown(42.5).upperLayers());
     }
 
+    @Test
+    void quantizesSubCellHeightsForHalfLayers() {
+        assertEquals(0, LayerMath.layersForHeight(-0.25, UP));
+        assertEquals(3, LayerMath.layersForHeight(0.375, UP));
+        assertEquals(5, LayerMath.layersForHeight(0.625, UP));
+        assertEquals(8, LayerMath.layersForHeight(1.25, UP));
+
+        assertEquals(0, LayerMath.layersForHeight(0.125, DOWN));
+        assertEquals(2, LayerMath.layersForHeight(0.375, DOWN));
+        assertEquals(4, LayerMath.layersForHeight(0.625, DOWN));
+        assertEquals(8, LayerMath.layersForHeight(1.25, DOWN));
+    }
+
     private static void assertLayers(
         double value,
         LayerMath.RoundingDirection roundingDirection,

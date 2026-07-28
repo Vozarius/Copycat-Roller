@@ -108,6 +108,8 @@ Create приводит к JPMS split-package, поэтому ordinal `1` изо
 
 ```java
 public static final BlockEntry<CopycatLayerBlock> COPYCAT_LAYER;
+public static final BlockEntry<CopycatHalfLayerBlock> COPYCAT_HALF_LAYER;
+public static final BlockEntry<CopycatSlopeLayerBlock> COPYCAT_SLOPE_LAYER;
 
 public class CopycatLayerBlock
     extends CCWaterloggedCopycatBlock
@@ -123,9 +125,37 @@ public class CopycatLayerBlock
     );
 }
 
+public class CopycatHalfLayerBlock
+    extends WaterloggedMultiStateCopycatBlock
+    implements SpecialBlockItemRequirement {
+    public static final EnumProperty<Direction.Axis> AXIS =
+        BlockStateProperties.HORIZONTAL_AXIS;
+    public static final EnumProperty<Half> HALF =
+        BlockStateProperties.HALF;
+    public static final IntegerProperty POSITIVE_LAYERS =
+        IntegerProperty.create("positive_layers", 0, 8);
+    public static final IntegerProperty NEGATIVE_LAYERS =
+        IntegerProperty.create("negative_layers", 0, 8);
+}
+
+public class CopycatSlopeLayerBlock
+    extends CCWaterloggedCopycatBlock
+    implements SpecialBlockItemRequirement, IStateType {
+    public static final DirectionProperty FACING =
+        BlockStateProperties.HORIZONTAL_FACING;
+    public static final EnumProperty<Half> HALF =
+        BlockStateProperties.HALF;
+    public static final IntegerProperty LAYERS =
+        BlockStateProperties.LAYERS;
+}
+
 public class CCCopycatBlockEntity
     extends SmartBlockEntity
     implements ICopycatBlockEntity;
+
+public class MultiStateCopycatBlockEntity
+    extends SmartBlockEntity
+    implements IMultiStateCopycatBlockEntity;
 
 default void ICopycatBlockEntity.init();
 default boolean ICopycatBlockEntity.hasCustomMaterial();
@@ -148,3 +178,22 @@ connected textures. `hasCustomMaterial()` возвращает `false` имен�
 `layers=N -> N` предметов. В runtime аддон не использует
 `SpecialBlockItemRequirement`; списание производится транзакционно из
 mounted inventory.
+
+`CopycatSlopeLayerBlock.getRequiredItems()` использует ту же функцию и
+поэтому также стоит `LAYERS` предметов. `CopycatHalfLayerBlock` объединяет
+два независимых требования:
+
+```java
+getRequiredItemsForLayer(state, POSITIVE_LAYERS)
+    .union(getRequiredItemsForLayer(state, NEGATIVE_LAYERS));
+```
+
+Его полная стоимость равна `positive_layers + negative_layers`; полный блок
+`8 + 8` требует 16 предметов `copycat_half_layer`. Свойства обеих половин
+официально допускают `0..8`, хотя ненулевой новый блок всегда содержит хотя
+бы одну половину.
+
+Half Layer создаёт `MultiStateCopycatBlockEntity`, остальные два слоя —
+`CCCopycatBlockEntity`. Для проверки пустого материала используется общий
+`ICopycatBlockEntity.hasCustomMaterial()`, а у multistate BE дополнительно
+проверяется пустой список `MaterialItemStorage.getAllConsumedItems()`.

@@ -18,7 +18,17 @@ public final class LayerMath {
     public static int layersAboveBase(double surfaceY, RoundingDirection roundingDirection) {
         int baseY = baseY(surfaceY);
         double fraction = surfaceY - baseY;
-        double scaled = fraction * 8.0 - BOUNDARY_EPSILON;
+        return layersForHeight(fraction, roundingDirection);
+    }
+
+    /**
+     * Quantizes a height inside a particular block cell. Unlike
+     * {@link #layersAboveBase(double, RoundingDirection)}, values outside
+     * {@code [0, 1]} are meaningful and are clamped after rounding.
+     */
+    public static int layersForHeight(double height, RoundingDirection roundingDirection) {
+        requireFinite(height);
+        double scaled = height * 8.0 - BOUNDARY_EPSILON;
         int layers = switch (roundingDirection) {
             case DOWN -> (int) Math.floor(scaled);
             case UP -> (int) Math.ceil(scaled);

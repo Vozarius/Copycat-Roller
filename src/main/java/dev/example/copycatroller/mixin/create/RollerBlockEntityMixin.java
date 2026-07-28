@@ -1,7 +1,7 @@
 package dev.example.copycatroller.mixin.create;
 
-import com.copycatsplus.copycats.CCBlocks;
 import com.simibubi.create.content.contraptions.actors.roller.RollerBlockEntity;
+import dev.example.copycatroller.paving.CopycatPavingMaterial;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -20,7 +20,7 @@ public abstract class RollerBlockEntityMixin {
         ItemStack newFilter,
         CallbackInfoReturnable<Boolean> callback
     ) {
-        if (newFilter.is(CCBlocks.COPYCAT_LAYER.asItem())) {
+        if (CopycatPavingMaterial.fromFilter(newFilter).isPresent()) {
             callback.setReturnValue(true);
         }
     }

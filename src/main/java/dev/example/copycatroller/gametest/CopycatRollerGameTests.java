@@ -1,13 +1,17 @@
 package dev.example.copycatroller.gametest;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.copycatsplus.copycats.CCBlocks;
+import com.copycatsplus.copycats.content.copycat.half_layer.CopycatHalfLayerBlock;
 import com.copycatsplus.copycats.content.copycat.layer.CopycatLayerBlock;
-import com.copycatsplus.copycats.foundation.copycat.CCCopycatBlockEntity;
+import com.copycatsplus.copycats.content.copycat.slope_layer.CopycatSlopeLayerBlock;
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlockEntity;
+import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlockEntity;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.RollerBlockEntity;
@@ -22,9 +26,11 @@ import dev.example.copycatroller.CopycatRoller;
 import dev.example.copycatroller.CopycatRollerConfig;
 import dev.example.copycatroller.paving.CopycatLayerPavingService;
 import dev.example.copycatroller.paving.CopycatLayerPavingService.PlacementResult;
+import dev.example.copycatroller.paving.CopycatPavingMaterial;
 import dev.example.copycatroller.paving.LayerMath;
 import dev.example.copycatroller.paving.PreciseTrackHeightSampler;
 import dev.example.copycatroller.paving.RollerModeGate;
+import dev.example.copycatroller.paving.TrackSurfaceSample;
 import net.createmod.catnip.data.Couple;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -34,6 +40,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -48,13 +57,15 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
-    public static void rollerAcceptsCopycatLayer(GameTestHelper helper) {
+    public static void rollerAcceptsSupportedLayerFamilies(GameTestHelper helper) {
         RollerBlockEntity roller = createRoller(helper);
-        check(
-            helper,
-            invokeMaterialPredicate(roller, new ItemStack(CCBlocks.COPYCAT_LAYER.asItem())),
-            "Mechanical Roller rejected copycats:copycat_layer"
-        );
+        for (CopycatPavingMaterial material : CopycatPavingMaterial.values()) {
+            check(
+                helper,
+                invokeMaterialPredicate(roller, new ItemStack(material.itemBlock().asItem())),
+                "Mechanical Roller rejected " + material
+            );
+        }
         helper.succeed();
     }
 
@@ -152,6 +163,247 @@ public final class CopycatRollerGameTests {
             );
             assertLayer(helper, position, layers);
         }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void halfLayerUsesIndependentAxisSidesAndExactCost(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        BlockState target = CopycatLayerPavingService.halfLayerStateFor(
+            Direction.Axis.X,
+            3,
+            5
+        );
+        ItemStackHandler inventory = inventory(CopycatPavingMaterial.HALF_LAYER, 12);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.HALF_LAYER,
+                target,
+                inventory
+            ) == PlacementResult.SUCCESS,
+            "Copycat Half Layer placement failed"
+        );
+        assertHalfLayer(helper, position, Direction.Axis.X, 3, 5);
+        assertEmptyMaterial(helper, position, CopycatPavingMaterial.HALF_LAYER);
+        check(helper, count(inventory) == 4, "half layer did not consume 3 + 5 items");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void halfLayerSamplesBothHalvesOfTrackGradient(GameTestHelper helper) {
+        TrackSurfaceSample risingEast = new TrackSurfaceSample(
+            10,
+            20,
+            64.5,
+            1,
+            0,
+            0.5,
+            0
+        );
+        Optional<BlockState> target = CopycatLayerPavingService.upperStateFor(
+            CopycatPavingMaterial.HALF_LAYER,
+            risingEast,
+            LayerMath.RoundingDirection.UP
+        );
+        check(helper, target.isPresent(), "half-layer gradient produced no upper state");
+        BlockState state = target.orElseThrow();
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.AXIS) == Direction.Axis.X,
+            "half-layer gradient selected the wrong axis"
+        );
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS) == 3,
+            "negative half did not sample x - 1/4"
+        );
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS) == 5,
+            "positive half did not sample x + 1/4"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void halfLayerGrowthIsIncrementalAndAtomic(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        ItemStackHandler initial = inventory(CopycatPavingMaterial.HALF_LAYER, 5);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 2, 3),
+            initial
+        );
+
+        ItemStackHandler insufficient = inventory(CopycatPavingMaterial.HALF_LAYER, 4);
+        PlacementResult failed = CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 5, 5),
+            insufficient
+        );
+        check(helper, failed == PlacementResult.FAIL, "underfunded half-layer growth succeeded");
+        assertHalfLayer(helper, position, Direction.Axis.Z, 2, 3);
+        check(helper, count(insufficient) == 4, "failed half-layer growth consumed items");
+
+        ItemStackHandler growth = inventory(CopycatPavingMaterial.HALF_LAYER, 7);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 5, 5),
+            growth
+        );
+        assertHalfLayer(helper, position, Direction.Axis.Z, 5, 5);
+        check(helper, count(growth) == 2, "half-layer growth did not consume (5-2) + (5-3)");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void slopeLayerFacesUphillAndConsumesLayers(GameTestHelper helper) {
+        TrackSurfaceSample risingEast = new TrackSurfaceSample(
+            10,
+            20,
+            64.5,
+            1,
+            0,
+            0.5,
+            0
+        );
+        BlockState target = CopycatLayerPavingService.upperStateFor(
+            CopycatPavingMaterial.SLOPE_LAYER,
+            risingEast,
+            LayerMath.RoundingDirection.UP
+        ).orElseThrow();
+        check(
+            helper,
+            target.getValue(CopycatSlopeLayerBlock.FACING) == Direction.EAST,
+            "rising-east slope did not face east"
+        );
+        check(
+            helper,
+            target.getValue(CopycatSlopeLayerBlock.LAYERS) == 4,
+            "half-block slope did not use layers=4"
+        );
+
+        BlockPos position = resetTarget(helper);
+        ItemStackHandler inventory = inventory(CopycatPavingMaterial.SLOPE_LAYER, 9);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.SLOPE_LAYER,
+                target,
+                inventory
+            ) == PlacementResult.SUCCESS,
+            "Copycat Slope Layer placement failed"
+        );
+        assertSlopeLayer(helper, position, Direction.EAST, 4);
+        assertEmptyMaterial(helper, position, CopycatPavingMaterial.SLOPE_LAYER);
+        check(helper, count(inventory) == 5, "slope layers=4 did not consume four items");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void slopeLayerReversesFacingOnDescendingTrack(GameTestHelper helper) {
+        TrackSurfaceSample risingWest = new TrackSurfaceSample(
+            10,
+            20,
+            64.75,
+            1,
+            0,
+            -0.5,
+            0
+        );
+        BlockState target = CopycatLayerPavingService.upperStateFor(
+            CopycatPavingMaterial.SLOPE_LAYER,
+            risingWest,
+            LayerMath.RoundingDirection.UP
+        ).orElseThrow();
+        check(
+            helper,
+            target.getValue(CopycatSlopeLayerBlock.FACING) == Direction.WEST,
+            "descending-east track did not face its higher west side"
+        );
+        check(
+            helper,
+            target.getValue(CopycatSlopeLayerBlock.LAYERS) == 6,
+            "three-quarter slope did not use layers=6"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void fullHalfAndSlopeLayersUseCopycatsRequirementCost(GameTestHelper helper) {
+        BlockPos halfPosition = resetTarget(helper);
+        ItemStackHandler halfInventory = inventory(CopycatPavingMaterial.HALF_LAYER, 20);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            halfPosition,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 8, 8),
+            halfInventory
+        );
+        check(helper, count(halfInventory) == 4, "full half layer did not consume 16 items");
+
+        BlockPos slopePosition = halfPosition.above();
+        helper.getLevel().setBlockAndUpdate(slopePosition, Blocks.AIR.defaultBlockState());
+        ItemStackHandler slopeInventory = inventory(CopycatPavingMaterial.SLOPE_LAYER, 12);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                slopePosition,
+                CopycatPavingMaterial.SLOPE_LAYER,
+                CopycatLayerPavingService.slopeLayerStateFor(Direction.SOUTH, 8),
+                slopeInventory
+            ) == PlacementResult.SUCCESS,
+            "full slope layer placement failed"
+        );
+        check(helper, count(slopeInventory) == 4, "full slope layer did not consume eight items");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void halfLayerCustomMaterialIsProtected(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 2, 2),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 4)
+        );
+        Object blockEntity = helper.getLevel().getBlockEntity(position);
+        check(
+            helper,
+            blockEntity instanceof IMultiStateCopycatBlockEntity,
+            "half layer did not create its multistate block entity"
+        );
+        IMultiStateCopycatBlockEntity copycat = (IMultiStateCopycatBlockEntity) blockEntity;
+        copycat.setMaterial(
+            CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+
+        ItemStackHandler inventory = inventory(CopycatPavingMaterial.HALF_LAYER, 12);
+        PlacementResult result = CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 5, 5),
+            inventory
+        );
+        check(helper, result == PlacementResult.FAIL, "custom half-layer material was overwritten");
+        assertHalfLayer(helper, position, Direction.Axis.X, 2, 2);
+        check(helper, count(inventory) == 12, "custom half layer consumed items");
         helper.succeed();
     }
 
@@ -375,6 +627,17 @@ public final class CopycatRollerGameTests {
         PaveTask task = new PaveTask(0, 0);
         TrackPaverV2.pave(task, graph, edge, 0, edge.getLength());
         assertCapturedCoverage(helper, task);
+
+        List<TrackSurfaceSample> samples = PreciseTrackHeightSampler.samples(task, 0);
+        check(
+            helper,
+            samples.stream().allMatch(sample ->
+                sample.longitudinalAxis() == Direction.Axis.X
+                    && sample.uphillDirection() == Direction.EAST
+                    && sample.gradientAlongAxis() > 0
+            ),
+            "straight sampler did not preserve its dominant axis and uphill gradient"
+        );
     }
 
     private static void assertCurveCoverage(GameTestHelper helper, Level level) {
@@ -429,8 +692,12 @@ public final class CopycatRollerGameTests {
     }
 
     private static ItemStackHandler inventory(int count) {
+        return inventory(CopycatPavingMaterial.LAYER, count);
+    }
+
+    private static ItemStackHandler inventory(CopycatPavingMaterial material, int count) {
         ItemStackHandler inventory = new ItemStackHandler(1);
-        inventory.setStackInSlot(0, new ItemStack(CCBlocks.COPYCAT_LAYER.asItem(), count));
+        inventory.setStackInSlot(0, new ItemStack(material.itemBlock().asItem(), count));
         return inventory;
     }
 
@@ -456,12 +723,67 @@ public final class CopycatRollerGameTests {
         );
     }
 
+    private static void assertHalfLayer(
+        GameTestHelper helper,
+        BlockPos position,
+        Direction.Axis axis,
+        int negativeLayers,
+        int positiveLayers
+    ) {
+        BlockState state = helper.getLevel().getBlockState(position);
+        check(helper, state.is(CCBlocks.COPYCAT_HALF_LAYER.get()), "expected Copycat Half Layer at " + position);
+        check(helper, state.getValue(CopycatHalfLayerBlock.AXIS) == axis, "unexpected half-layer axis");
+        check(helper, state.getValue(CopycatHalfLayerBlock.HALF) == Half.BOTTOM, "half layer is not bottom");
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS) == negativeLayers,
+            "unexpected negative half layers"
+        );
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS) == positiveLayers,
+            "unexpected positive half layers"
+        );
+        check(helper, !state.getValue(BlockStateProperties.WATERLOGGED), "half layer is waterlogged");
+    }
+
+    private static void assertSlopeLayer(
+        GameTestHelper helper,
+        BlockPos position,
+        Direction facing,
+        int layers
+    ) {
+        BlockState state = helper.getLevel().getBlockState(position);
+        check(helper, state.is(CCBlocks.COPYCAT_SLOPE_LAYER.get()), "expected Copycat Slope Layer at " + position);
+        check(helper, state.getValue(CopycatSlopeLayerBlock.FACING) == facing, "unexpected slope facing");
+        check(helper, state.getValue(CopycatSlopeLayerBlock.HALF) == Half.BOTTOM, "slope layer is not bottom");
+        check(helper, state.getValue(CopycatSlopeLayerBlock.LAYERS) == layers, "unexpected slope layers");
+        check(helper, !state.getValue(BlockStateProperties.WATERLOGGED), "slope layer is waterlogged");
+    }
+
     private static void assertEmptyMaterial(GameTestHelper helper, BlockPos position) {
+        assertEmptyMaterial(helper, position, CopycatPavingMaterial.LAYER);
+    }
+
+    private static void assertEmptyMaterial(
+        GameTestHelper helper,
+        BlockPos position,
+        CopycatPavingMaterial material
+    ) {
         Object blockEntity = helper.getLevel().getBlockEntity(position);
-        check(helper, blockEntity instanceof CCCopycatBlockEntity, "expected Copycats+ block entity is missing");
+        check(helper, blockEntity instanceof ICopycatBlockEntity, "expected Copycats+ block entity is missing");
         ICopycatBlockEntity copycat = (ICopycatBlockEntity) blockEntity;
+        check(helper, material.hasExpectedBlockEntity(copycat), "unexpected Copycats+ block entity type");
         check(helper, !copycat.hasCustomMaterial(), "new Copycat Layer has a custom material");
-        check(helper, copycat.getConsumedItem().isEmpty(), "new Copycat Layer has a consumed material item");
+        if (copycat instanceof IMultiStateCopycatBlockEntity multiState) {
+            check(
+                helper,
+                multiState.getMaterialItemStorage().getAllConsumedItems().isEmpty(),
+                "new multistate layer has consumed material items"
+            );
+        } else {
+            check(helper, copycat.getConsumedItem().isEmpty(), "new Copycat Layer has a consumed material item");
+        }
     }
 
     private static void check(GameTestHelper helper, boolean condition, String message) {

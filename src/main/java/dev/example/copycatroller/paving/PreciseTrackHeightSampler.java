@@ -25,7 +25,7 @@ import net.minecraft.world.phys.Vec3;
  * reduces to an integer (straight track) or half block (Bezier track).
  */
 public final class PreciseTrackHeightSampler {
-    private static final Map<PaveTask, Map<ColumnKey, Double>> CAPTURES =
+    private static final Map<PaveTask, Map<ColumnKey, HeightCapture>> CAPTURES =
         Collections.synchronizedMap(new WeakHashMap<>());
 
     private PreciseTrackHeightSampler() {
@@ -40,7 +40,7 @@ public final class PreciseTrackHeightSampler {
     }
 
     public static List<TrackSurfaceSample> samples(PaveTask task, int rollerLocalY) {
-        Map<ColumnKey, Double> captured;
+        Map<ColumnKey, HeightCapture> captured;
         synchronized (CAPTURES) {
             captured = CAPTURES.get(task);
             if (captured != null) {
@@ -58,11 +58,19 @@ public final class PreciseTrackHeightSampler {
         List<TrackSurfaceSample> result = new ArrayList<>(task.keys().size());
         for (Couple<Integer> coordinates : task.keys()) {
             ColumnKey key = new ColumnKey(coordinates.getFirst(), coordinates.getSecond());
-            Double y = captured.get(key);
-            if (y == null) {
+            HeightCapture capture = captured.get(key);
+            if (capture == null) {
                 throw new IllegalStateException("Missing precise track height for " + key.x + ", " + key.z);
             }
-            result.add(new TrackSurfaceSample(key.x, key.z, y + rollerLocalY));
+            result.add(new TrackSurfaceSample(
+                key.x,
+                key.z,
+                capture.y + rollerLocalY,
+                capture.tangentX,
+                capture.tangentZ,
+                capture.gradientX,
+                capture.gradientZ
+            ));
         }
         result.sort(Comparator.comparingInt(TrackSurfaceSample::x).thenComparingInt(TrackSurfaceSample::z));
         return List.copyOf(result);
@@ -91,6 +99,12 @@ public final class PreciseTrackHeightSampler {
 
         double horizontalLengthSquared =
             difference.x * difference.x + difference.z * difference.z;
+        double gradientX = horizontalLengthSquared < 1.0e-12
+            ? 0
+            : difference.y * difference.x / horizontalLengthSquared;
+        double gradientZ = horizontalLengthSquared < 1.0e-12
+            ? 0
+            : difference.y * difference.z / horizontalLengthSquared;
         for (Couple<Integer> coordinates : coverage.keys()) {
             double t;
             if (horizontalLengthSquared < 1.0e-12) {
@@ -112,7 +126,16 @@ public final class PreciseTrackHeightSampler {
             if (levelEdge) {
                 preciseY = Math.floor(preciseY);
             }
-            putMinimum(task, coordinates.getFirst(), coordinates.getSecond(), preciseY);
+            putMinimum(
+                task,
+                coordinates.getFirst(),
+                coordinates.getSecond(),
+                preciseY,
+                difference.x,
+                difference.z,
+                levelEdge ? 0 : gradientX,
+                levelEdge ? 0 : gradientZ
+            );
         }
     }
 
@@ -169,6 +192,14 @@ public final class PreciseTrackHeightSampler {
             Vec3 secondHorizontalNormal = horizontalNormal(
                 start, end, startHandle, endHandle, startNormal, endNormal, t1
             );
+            Vec3 tangent = second.subtract(first);
+            double horizontalLengthSquared =
+                tangent.x * tangent.x + tangent.z * tangent.z;
+            if (horizontalLengthSquared < 1.0e-12) {
+                continue;
+            }
+            double gradientX = tangent.y * tangent.x / horizontalLengthSquared;
+            double gradientZ = tangent.y * tangent.z / horizontalLengthSquared;
 
             Vec2 a = vec2(first.add(firstHorizontalNormal.scale(radiusOuter)));
             Vec2 b = vec2(second.add(secondHorizontalNormal.scale(radiusOuter)));
@@ -183,7 +214,16 @@ public final class PreciseTrackHeightSampler {
                 if (!isInTriangle(a, b, c, center) && !isInTriangle(a, c, d, center)) {
                     continue;
                 }
-                putMinimum(task, coordinates.getFirst(), coordinates.getSecond(), y);
+                putMinimum(
+                    task,
+                    coordinates.getFirst(),
+                    coordinates.getSecond(),
+                    y,
+                    tangent.x,
+                    tangent.z,
+                    gradientX,
+                    gradientZ
+                );
             }
         }
     }
@@ -238,14 +278,43 @@ public final class PreciseTrackHeightSampler {
             : s >= 0 && t >= 0 && s + t <= determinant;
     }
 
-    private static void putMinimum(PaveTask task, int x, int z, double y) {
+    private static void putMinimum(
+        PaveTask task,
+        int x,
+        int z,
+        double y,
+        double tangentX,
+        double tangentZ,
+        double gradientX,
+        double gradientZ
+    ) {
+        HeightCapture next = new HeightCapture(
+            y,
+            tangentX,
+            tangentZ,
+            gradientX,
+            gradientZ
+        );
         synchronized (CAPTURES) {
             CAPTURES
                 .computeIfAbsent(task, ignored -> new HashMap<>())
-                .merge(new ColumnKey(x, z), y, Math::min);
+                .merge(
+                    new ColumnKey(x, z),
+                    next,
+                    (current, candidate) -> candidate.y < current.y ? candidate : current
+                );
         }
     }
 
     private record ColumnKey(int x, int z) {
+    }
+
+    private record HeightCapture(
+        double y,
+        double tangentX,
+        double tangentZ,
+        double gradientX,
+        double gradientZ
+    ) {
     }
 }

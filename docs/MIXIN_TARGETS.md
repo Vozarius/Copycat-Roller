@@ -14,7 +14,8 @@
    - Descriptor:
      `(Lnet/minecraft/world/item/ItemStack;)Z`
    - Injection: `HEAD`, cancellable; возвращает `true` только для точного
-     `CCBlocks.COPYCAT_LAYER.asItem()`. Для остальных предметов callback не
+     предмета `CCBlocks.COPYCAT_LAYER`, `CCBlocks.COPYCAT_HALF_LAYER` или
+     `CCBlocks.COPYCAT_SLOPE_LAYER`. Для остальных предметов callback не
      изменяется.
 
 2. `com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour`
@@ -23,8 +24,8 @@
    - Method: `triggerPaver`
    - Descriptor:
      `(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;)V`
-   - Injection: `HEAD`, cancellable; отменяет только сочетание точного
-     фильтра Copycat Layer и `STRAIGHT_FILL`.
+   - Injection: `HEAD`, cancellable; отменяет только сочетание одного из
+     трёх точных фильтров Copycat Layer и `STRAIGHT_FILL`.
    - Shadow:
      `createHeightProfileForTracks(MovementContext): PaveTask`.
 
@@ -34,9 +35,9 @@
    - Method: `pave`
    - Descriptor:
      `(Lcom/simibubi/create/content/contraptions/actors/roller/PaveTask;Lcom/simibubi/create/content/trains/graph/TrackGraph;Lcom/simibubi/create/content/trains/graph/TrackEdge;DD)V`
-   - Injection: статический `HEAD`; сохраняет точный Y до того, как Create
-     сведёт его к `BlockPos` или половине блока.
+   - Injection: статический `HEAD`; сохраняет точный Y, локальную касательную
+     и горизонтальный градиент до того, как Create сведёт Y к `BlockPos` или
+     половине блока.
 
 Больших `@Overwrite` нет. Сторонние методы `tryFill`,
 `getStateToPaveWith` и `getMode` не заменяются.
-

@@ -4,10 +4,12 @@ import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import dev.example.copycatroller.paving.CopycatLayerPavingService;
+import dev.example.copycatroller.paving.CopycatPavingMaterial;
 import dev.example.copycatroller.paving.RollerModeGate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.world.item.ItemStack;
+import java.util.Optional;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -37,8 +39,9 @@ public abstract class RollerMovementBehaviourMixin {
             context.world.registryAccess(),
             context.blockEntityData.getCompound("Filter")
         );
-        if (!CopycatLayerPavingService.isCopycatLayer(filter)
-            || !RollerModeGate.isStraightFill(context.blockEntityData)) {
+        Optional<CopycatPavingMaterial> material =
+            CopycatLayerPavingService.materialFor(filter);
+        if (material.isEmpty() || !RollerModeGate.isStraightFill(context.blockEntityData)) {
             return;
         }
 
@@ -48,7 +51,12 @@ public abstract class RollerMovementBehaviourMixin {
         }
 
         PaveTask trackProfile = createHeightProfileForTracks(context);
-        if (!CopycatLayerPavingService.pave(context, position, trackProfile)) {
+        if (!CopycatLayerPavingService.pave(
+            context,
+            position,
+            trackProfile,
+            material.orElseThrow()
+        )) {
             return;
         }
 
