@@ -1,0 +1,43 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "${mod_license}"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+authors = "${mod_authors}"
+description = '''
+Adds precise 1/8-block Copycats+ Copycat Layer paving to Create Mechanical Rollers.
+'''
+
+[[mixins]]
+config = "copycat_roller.mixins.json"
+
+[[dependencies."${mod_id}"]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,21.2.0)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1]"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "create"
+type = "required"
+versionRange = "[6.0.11,6.0.12)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "copycats"
+type = "required"
+versionRange = "[3.0.4,3.0.5)"
+ordering = "AFTER"
+side = "BOTH"

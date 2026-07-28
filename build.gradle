@@ -1,0 +1,128 @@
+plugins {
+    id "java"
+    id "maven-publish"
+    id "net.neoforged.moddev" version "2.0.141"
+}
+
+group = mod_group
+version = mod_version
+
+base {
+    archivesName = mod_id
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+neoForge {
+    version = neoforge_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_version
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+
+    runs {
+        configureEach {
+            systemProperty "neoforge.enabledGameTestNamespaces", mod_id
+            systemProperty "mixin.debug.verbose", "true"
+        }
+
+        client {
+            client()
+            gameDirectory = project.file("run/client")
+        }
+
+        server {
+            server()
+            gameDirectory = project.file("run/server")
+            programArgument "--nogui"
+        }
+
+        gameTestServer {
+            type = "gameTestServer"
+            gameDirectory = project.file("run/gametest")
+        }
+    }
+}
+
+repositories {
+    maven { url = "https://maven.createmod.net" }
+    maven { url = "https://maven.ithundxr.dev/snapshots" }
+    maven { url = "https://www.cursemaven.com" }
+    maven { url = "https://raw.githubusercontent.com/Fuzss/modresources/main/maven" }
+}
+
+configurations {
+    localRuntimeOnly
+    runtimeClasspath.extendsFrom(localRuntimeOnly)
+}
+
+dependencies {
+    implementation("com.simibubi.create:create-${minecraft_version}:${create_version}") {
+        transitive = false
+    }
+    implementation("net.createmod.ponder:ponder-neoforge:${ponder_version}+mc${minecraft_version}")
+    compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
+    runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
+    implementation("com.tterrag.registrate:Registrate:${registrate_version}")
+
+    implementation("curse.maven:copycats-968398:${copycats_curse_file}")
+
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.named("test", Test) {
+    useJUnitPlatform()
+}
+
+tasks.named("processResources", ProcessResources) {
+    def replacements = [
+        mod_id: mod_id,
+        mod_name: mod_name,
+        mod_version: mod_version,
+        mod_authors: mod_authors,
+        mod_license: mod_license
+    ]
+    inputs.properties(replacements)
+    filesMatching("META-INF/neoforge.mods.toml") {
+        expand(replacements)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release = 21
+}
+
+jar {
+    manifest {
+        attributes([
+            "Specification-Title": mod_name,
+            "Specification-Vendor": mod_authors,
+            "Specification-Version": mod_version,
+            "Implementation-Title": project.name,
+            "Implementation-Version": project.version
+        ])
+    }
+}
+
+publishing {
+    publications {
+        register("mavenJava", MavenPublication) {
+            from components.java
+        }
+    }
+}

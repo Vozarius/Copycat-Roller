@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "priority": 1000,
+  "package": "dev.example.copycatroller.mixin.create",
+  "plugin": "dev.example.copycatroller.mixin.CopycatRollerMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "RollerBlockEntityMixin",
+    "RollerMovementBehaviourMixin",
+    "TrackPaverV2Mixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
