@@ -41,7 +41,9 @@ public abstract class RollerMovementBehaviourMixin {
         );
         Optional<CopycatPavingMaterial> material =
             CopycatLayerPavingService.materialFor(filter);
-        if (material.isEmpty() || !RollerModeGate.isStraightFill(context.blockEntityData)) {
+        boolean zincMode = CopycatLayerPavingService.isZincIngot(filter);
+        if ((material.isEmpty() && !zincMode)
+            || !RollerModeGate.isStraightFill(context.blockEntityData)) {
             return;
         }
 
@@ -51,12 +53,19 @@ public abstract class RollerMovementBehaviourMixin {
         }
 
         PaveTask trackProfile = createHeightProfileForTracks(context);
-        if (!CopycatLayerPavingService.pave(
-            context,
-            position,
-            trackProfile,
-            material.orElseThrow()
-        )) {
+        boolean paved = zincMode
+            ? CopycatLayerPavingService.paveWithZinc(
+                context,
+                position,
+                trackProfile
+            )
+            : CopycatLayerPavingService.pave(
+                context,
+                position,
+                trackProfile,
+                material.orElseThrow()
+            );
+        if (!paved) {
             return;
         }
 

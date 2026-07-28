@@ -9,6 +9,7 @@ import com.copycatsplus.copycats.content.copycat.layer.CopycatLayerBlock;
 import com.copycatsplus.copycats.content.copycat.slope_layer.CopycatSlopeLayerBlock;
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlockEntity;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlockEntity;
+import com.simibubi.create.AllItems;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import com.simibubi.create.foundation.item.ItemHelper;
@@ -33,11 +34,17 @@ import org.jetbrains.annotations.Nullable;
  * by Mechanical Roller.
  */
 public final class CopycatLayerPavingService {
+    private static final double SLOPE_EPSILON = 1.0e-7;
+
     private CopycatLayerPavingService() {
     }
 
     public static boolean isCopycatLayer(ItemStack stack) {
         return CopycatPavingMaterial.fromFilter(stack).isPresent();
+    }
+
+    public static boolean isZincIngot(ItemStack stack) {
+        return !stack.isEmpty() && stack.is(AllItems.ZINC_INGOT.get());
     }
 
     public static Optional<CopycatPavingMaterial> materialFor(ItemStack stack) {
@@ -73,6 +80,33 @@ public final class CopycatLayerPavingService {
         );
         LayerMath.RoundingDirection roundingDirection =
             CopycatRollerConfig.ROUNDING_DIRECTION.get();
+
+        if (preciseTrackProfile && CopycatRollerConfig.SURFACE_ONLY.get()) {
+            boolean anyPlacement = false;
+            double slopeMaxVerticalError =
+                CopycatRollerConfig.SLOPE_MAX_VERTICAL_ERROR.get();
+            for (TrackSurfaceSample sample : samples) {
+                Optional<SurfacePlacement> planned = surfacePlacementFor(
+                    material,
+                    sample,
+                    roundingDirection,
+                    slopeMaxVerticalError
+                );
+                if (planned.isEmpty()) {
+                    continue;
+                }
+                SurfacePlacement placement = planned.orElseThrow();
+                PlacementResult result = tryPlace(
+                    context.world,
+                    placement.pos(),
+                    material,
+                    placement.state(),
+                    inventory
+                );
+                anyPlacement |= result == PlacementResult.SUCCESS;
+            }
+            return anyPlacement;
+        }
 
         for (int depth = 0; depth < fillLevels; depth++) {
             boolean completelyBlocked = true;
@@ -122,6 +156,142 @@ public final class CopycatLayerPavingService {
     }
 
     /**
+     * Automatic zinc mode. Equal half heights collapse to an ordinary Layer;
+     * unequal heights remain a Half Layer.
+     */
+    public static boolean paveWithZinc(
+        MovementContext context,
+        BlockPos fallbackPosition,
+        @Nullable PaveTask trackProfile
+    ) {
+        if (context.world.isClientSide || context.contraption == null) {
+            return false;
+        }
+
+        IItemHandler inventory = context.contraption.getStorage().getAllItems();
+        boolean preciseTrackProfile = trackProfile != null;
+        List<TrackSurfaceSample> samples = !preciseTrackProfile
+            ? List.of(new TrackSurfaceSample(
+                fallbackPosition.getX(),
+                fallbackPosition.getZ(),
+                fallbackPosition.getY()
+            ))
+            : PreciseTrackHeightSampler.samples(trackProfile, context.localPos.getY());
+        if (samples.isEmpty()) {
+            return false;
+        }
+
+        LayerMath.RoundingDirection roundingDirection =
+            CopycatRollerConfig.ROUNDING_DIRECTION.get();
+        if (preciseTrackProfile && CopycatRollerConfig.SURFACE_ONLY.get()) {
+            boolean anyPlacement = false;
+            for (TrackSurfaceSample sample : samples) {
+                Optional<CopycatPlacement> planned = zincSurfacePlacementFor(
+                    sample,
+                    roundingDirection
+                );
+                if (planned.isEmpty()) {
+                    continue;
+                }
+                CopycatPlacement placement = planned.orElseThrow();
+                PlacementResult result = tryPlaceWithZinc(
+                    context.world,
+                    placement.pos(),
+                    placement.material(),
+                    placement.state(),
+                    inventory
+                );
+                anyPlacement |= result == PlacementResult.SUCCESS;
+            }
+            return anyPlacement;
+        }
+
+        int fillLevels = PavingLimits.effectiveFillLevels(
+            CopycatRollerConfig.FILL_DEPTH_BLOCKS.get(),
+            AllConfigs.server().kinetics.rollerFillDepth.get()
+        );
+        for (int depth = 0; depth < fillLevels; depth++) {
+            boolean completelyBlocked = true;
+            boolean anyPlacement = false;
+            for (TrackSurfaceSample sample : samples) {
+                int baseY = preciseTrackProfile
+                    ? LayerMath.baseY(sample.surfaceY())
+                    : fallbackPosition.getY();
+
+                if (preciseTrackProfile && depth == 0) {
+                    Optional<CopycatPlacement> upper = zincLegacyUpperPlacementFor(
+                        sample,
+                        roundingDirection
+                    );
+                    if (upper.isPresent()) {
+                        CopycatPlacement placement = upper.orElseThrow();
+                        PlacementResult result = tryPlaceWithZinc(
+                            context.world,
+                            placement.pos(),
+                            placement.material(),
+                            placement.state(),
+                            inventory
+                        );
+                        completelyBlocked &= result == PlacementResult.FAIL;
+                        anyPlacement |= result == PlacementResult.SUCCESS;
+                    }
+                }
+
+                PlacementResult baseResult = tryPlaceWithZinc(
+                    context.world,
+                    new BlockPos(sample.x(), baseY - depth, sample.z()),
+                    CopycatPavingMaterial.LAYER,
+                    stateFor(8),
+                    inventory
+                );
+                completelyBlocked &= baseResult == PlacementResult.FAIL;
+                anyPlacement |= baseResult == PlacementResult.SUCCESS;
+            }
+
+            if (anyPlacement) {
+                return true;
+            }
+            if (completelyBlocked && depth > 0) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Plans only the highest occupied cell of a precise track column.
+     *
+     * <p>The Create profile denotes the base full block, so the physical top
+     * surface is {@code profileY + 1}. The planner moves the target cell across
+     * integer boundaries instead of unconditionally creating a full base
+     * block. A level integer surface therefore produces no placement.</p>
+     */
+    public static Optional<SurfacePlacement> surfacePlacementFor(
+        CopycatPavingMaterial material,
+        TrackSurfaceSample sample,
+        LayerMath.RoundingDirection roundingDirection,
+        double slopeMaxVerticalError
+    ) {
+        return switch (material) {
+            case LAYER -> planSimpleSurface(sample, roundingDirection);
+            case HALF_LAYER -> planHalfSurface(sample, roundingDirection);
+            case SLOPE_LAYER -> planSlopeSurface(
+                sample,
+                roundingDirection,
+                slopeMaxVerticalError
+            );
+        };
+    }
+
+    public static Optional<CopycatPlacement> zincSurfacePlacementFor(
+        TrackSurfaceSample sample,
+        LayerMath.RoundingDirection roundingDirection
+    ) {
+        return planHalfSurface(sample, roundingDirection)
+            .map(CopycatLayerPavingService::collapseEqualHalfLayers);
+    }
+
+    /**
      * Backwards-compatible entry point used by the original Copycat Layer
      * tests and by integrations that only need the simple layer.
      */
@@ -146,6 +316,46 @@ public final class CopycatLayerPavingService {
         CopycatPavingMaterial material,
         BlockState requestedState,
         IItemHandler inventory
+    ) {
+        return tryPlaceInternal(
+            level,
+            position,
+            material,
+            requestedState,
+            inventory,
+            PaymentSource.DIRECT
+        );
+    }
+
+    public static PlacementResult tryPlaceWithZinc(
+        Level level,
+        BlockPos position,
+        CopycatPavingMaterial material,
+        BlockState requestedState,
+        IItemHandler inventory
+    ) {
+        if (material == CopycatPavingMaterial.SLOPE_LAYER) {
+            throw new IllegalArgumentException(
+                "automatic zinc paving supports only Layer and Half Layer"
+            );
+        }
+        return tryPlaceInternal(
+            level,
+            position,
+            material,
+            requestedState,
+            inventory,
+            PaymentSource.ZINC
+        );
+    }
+
+    private static PlacementResult tryPlaceInternal(
+        Level level,
+        BlockPos position,
+        CopycatPavingMaterial material,
+        BlockState requestedState,
+        IItemHandler inventory,
+        PaymentSource paymentSource
     ) {
         requireTargetState(material, requestedState);
         if (level.isClientSide || !level.isLoaded(position)) {
@@ -194,31 +404,10 @@ public final class CopycatLayerPavingService {
             return PlacementResult.PASS;
         }
 
-        ItemStack simulated = ItemHelper.extract(
-            inventory,
-            material.itemPredicate(),
-            itemCost,
-            true
-        );
-        if (simulated.getCount() != itemCost) {
-            return PlacementResult.FAIL;
-        }
-
-        /*
-         * Create's exact ItemHelper extraction performs its own complete
-         * preflight before mutating the synchronous mounted handler. No other
-         * server task can interleave between that preflight and its slot
-         * mutations.
-         */
-        ItemStack extracted = ItemHelper.extract(
-            inventory,
-            material.itemPredicate(),
-            itemCost,
-            false
-        );
-        if (extracted.getCount() != itemCost) {
-            refund(level, position, inventory, extracted, material);
-            logFailure("Mounted storage changed during extraction at {}", position);
+        Optional<PaymentReceipt> payment = paymentSource == PaymentSource.DIRECT
+            ? payDirect(level, position, inventory, material, itemCost)
+            : payWithZinc(level, position, inventory, material, itemCost);
+        if (payment.isEmpty()) {
             return PlacementResult.FAIL;
         }
 
@@ -229,7 +418,7 @@ public final class CopycatLayerPavingService {
             || !material.hasExpectedBlockEntity(copycat)
             || !isEmptyCopycat(copycat)) {
             level.setBlockAndUpdate(position, oldState);
-            refund(level, position, inventory, extracted, material);
+            payment.orElseThrow().rollback();
             logFailure("Rolled back invalid {} placement at {}", material, position);
             return PlacementResult.FAIL;
         }
@@ -251,11 +440,11 @@ public final class CopycatLayerPavingService {
             }
             case HALF_LAYER -> {
                 int negativeLayers = LayerMath.layersForHeight(
-                    sample.negativeHalfSurfaceY() - baseY,
+                    sample.minimumHalfSurfaceY(false) - baseY,
                     roundingDirection
                 );
                 int positiveLayers = LayerMath.layersForHeight(
-                    sample.positiveHalfSurfaceY() - baseY,
+                    sample.minimumHalfSurfaceY(true) - baseY,
                     roundingDirection
                 );
                 yield negativeLayers == 0 && positiveLayers == 0
@@ -273,6 +462,136 @@ public final class CopycatLayerPavingService {
                     : Optional.of(slopeLayerStateFor(sample.uphillDirection(), layers));
             }
         };
+    }
+
+    private static Optional<SurfacePlacement> planSimpleSurface(
+        TrackSurfaceSample sample,
+        LayerMath.RoundingDirection roundingDirection
+    ) {
+        double topY = sample.minimumCellSurfaceY() + 1;
+        int cellY = LayerMath.baseY(topY);
+        int layers = LayerMath.layersForHeight(topY - cellY, roundingDirection);
+        if (layers == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(new SurfacePlacement(
+            new BlockPos(sample.x(), cellY, sample.z()),
+            stateFor(layers)
+        ));
+    }
+
+    private static Optional<SurfacePlacement> planHalfSurface(
+        TrackSurfaceSample sample,
+        LayerMath.RoundingDirection roundingDirection
+    ) {
+        double negativeTopY = sample.minimumHalfSurfaceY(false) + 1;
+        double positiveTopY = sample.minimumHalfSurfaceY(true) + 1;
+        int cellY = LayerMath.baseY(Math.min(negativeTopY, positiveTopY));
+        int negativeLayers = safeFlatLayers(
+            negativeTopY - cellY,
+            roundingDirection
+        );
+        int positiveLayers = safeFlatLayers(
+            positiveTopY - cellY,
+            roundingDirection
+        );
+        if (negativeLayers == 0 && positiveLayers == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(new SurfacePlacement(
+            new BlockPos(sample.x(), cellY, sample.z()),
+            halfLayerStateFor(
+                sample.longitudinalAxis(),
+                negativeLayers,
+                positiveLayers
+            )
+        ));
+    }
+
+    private static Optional<SurfacePlacement> planSlopeSurface(
+        TrackSurfaceSample sample,
+        LayerMath.RoundingDirection roundingDirection,
+        double slopeMaxVerticalError
+    ) {
+        if (Math.abs(sample.gradientAlongAxis()) < SLOPE_EPSILON) {
+            return Optional.empty();
+        }
+        double lowTopY = sample.lowSlopeEdgeSurfaceY() + 1;
+        double highTopY = sample.highSlopeEdgeSurfaceY() + 1;
+        int cellY = LayerMath.baseY(Math.min(lowTopY, highTopY));
+        double desiredLow = lowTopY - cellY;
+        double desiredHigh = highTopY - cellY;
+        int maximumLayers = LayerMath.layersForHeight(
+            (desiredLow + desiredHigh) * 0.5,
+            roundingDirection
+        );
+        var selected = SlopeLayerGeometry.selectBestState(
+            desiredLow,
+            desiredHigh,
+            maximumLayers,
+            slopeMaxVerticalError
+        );
+        if (selected.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new SurfacePlacement(
+            new BlockPos(sample.x(), cellY, sample.z()),
+            slopeLayerStateFor(sample.uphillDirection(), selected.getAsInt())
+        ));
+    }
+
+    private static Optional<CopycatPlacement> zincLegacyUpperPlacementFor(
+        TrackSurfaceSample sample,
+        LayerMath.RoundingDirection roundingDirection
+    ) {
+        int baseY = LayerMath.baseY(sample.surfaceY());
+        return upperStateFor(
+            CopycatPavingMaterial.HALF_LAYER,
+            sample,
+            roundingDirection
+        ).map(state -> collapseEqualHalfLayers(new SurfacePlacement(
+            new BlockPos(sample.x(), baseY + 1, sample.z()),
+            state
+        )));
+    }
+
+    private static CopycatPlacement collapseEqualHalfLayers(
+        SurfacePlacement halfPlacement
+    ) {
+        BlockState halfState = halfPlacement.state();
+        int negativeLayers =
+            halfState.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS);
+        int positiveLayers =
+            halfState.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS);
+        if (negativeLayers == positiveLayers) {
+            return new CopycatPlacement(
+                halfPlacement.pos(),
+                CopycatPavingMaterial.LAYER,
+                stateFor(negativeLayers)
+            );
+        }
+        return new CopycatPlacement(
+            halfPlacement.pos(),
+            CopycatPavingMaterial.HALF_LAYER,
+            halfState
+        );
+    }
+
+    /**
+     * UP may request a state above a conservative footprint sample. The safety
+     * cap keeps rectangular states below that sample; DOWN retains its strict
+     * previous-eighth semantics.
+     */
+    private static int safeFlatLayers(
+        double height,
+        LayerMath.RoundingDirection roundingDirection
+    ) {
+        int requested = LayerMath.layersForHeight(height, roundingDirection);
+        int safeMaximum = (int) Math.floor(
+            height * 8.0 + LayerMath.BOUNDARY_EPSILON
+        );
+        safeMaximum = Math.max(0, Math.min(8, safeMaximum));
+        return Math.min(requested, safeMaximum);
     }
 
     public static BlockState fullStateFor(
@@ -381,6 +700,235 @@ public final class CopycatLayerPavingService {
         };
     }
 
+    private static Optional<PaymentReceipt> payDirect(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        CopycatPavingMaterial material,
+        int itemCost
+    ) {
+        ItemStack simulated = ItemHelper.extract(
+            inventory,
+            material.itemPredicate(),
+            itemCost,
+            true
+        );
+        if (simulated.getCount() != itemCost) {
+            return Optional.empty();
+        }
+
+        /*
+         * Create's exact ItemHelper extraction performs its own complete
+         * preflight before mutating the synchronous mounted handler. No other
+         * server task can interleave between that preflight and its slot
+         * mutations.
+         */
+        ItemStack extracted = ItemHelper.extract(
+            inventory,
+            material.itemPredicate(),
+            itemCost,
+            false
+        );
+        if (extracted.getCount() != itemCost) {
+            refund(level, position, inventory, extracted, material);
+            logFailure("Mounted storage changed during extraction at {}", position);
+            return Optional.empty();
+        }
+        return Optional.of(() ->
+            refund(level, position, inventory, extracted, material)
+        );
+    }
+
+    private static Optional<PaymentReceipt> payWithZinc(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        CopycatPavingMaterial material,
+        int itemUnits
+    ) {
+        int requiredCredits = switch (material) {
+            case LAYER -> ZincCreditMath.creditsForLayers(itemUnits);
+            case HALF_LAYER -> itemUnits;
+            case SLOPE_LAYER -> throw new IllegalArgumentException(
+                "Slope Layer cannot be paid from automatic zinc mode"
+            );
+        };
+        int availableHalfLayers = countMatching(
+            inventory,
+            CopycatPavingMaterial.HALF_LAYER,
+            requiredCredits
+        );
+        ZincCreditMath.PaymentPlan plan =
+            ZincCreditMath.plan(requiredCredits, availableHalfLayers);
+
+        if (plan.halfLayersToConsume() > 0) {
+            ItemStack simulatedHalfLayers = ItemHelper.extract(
+                inventory,
+                CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
+                plan.halfLayersToConsume(),
+                true
+            );
+            if (simulatedHalfLayers.getCount() != plan.halfLayersToConsume()) {
+                return Optional.empty();
+            }
+        }
+        if (plan.zincIngotsToConsume() > 0) {
+            ItemStack simulatedZinc = ItemHelper.extract(
+                inventory,
+                CopycatLayerPavingService::isZincIngot,
+                plan.zincIngotsToConsume(),
+                true
+            );
+            if (simulatedZinc.getCount() != plan.zincIngotsToConsume()) {
+                return Optional.empty();
+            }
+        }
+
+        ItemStack extractedHalfLayers = plan.halfLayersToConsume() == 0
+            ? ItemStack.EMPTY
+            : ItemHelper.extract(
+                inventory,
+                CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
+                plan.halfLayersToConsume(),
+                false
+            );
+        if (extractedHalfLayers.getCount() != plan.halfLayersToConsume()) {
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedHalfLayers,
+                "zinc paving half-layer credits"
+            );
+            logFailure("Half-layer credit storage changed at {}", position);
+            return Optional.empty();
+        }
+
+        ItemStack extractedZinc = plan.zincIngotsToConsume() == 0
+            ? ItemStack.EMPTY
+            : ItemHelper.extract(
+                inventory,
+                CopycatLayerPavingService::isZincIngot,
+                plan.zincIngotsToConsume(),
+                false
+            );
+        if (extractedZinc.getCount() != plan.zincIngotsToConsume()) {
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedHalfLayers,
+                "zinc paving half-layer credits"
+            );
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedZinc,
+                "zinc paving ingots"
+            );
+            logFailure("Zinc storage changed during extraction at {}", position);
+            return Optional.empty();
+        }
+
+        /*
+         * Extracting the zinc can itself free the slot needed for change, so
+         * insertion cannot be preflighted against the unmodified handler.
+         * Mounted storage is mutated synchronously on the server thread: if
+         * change insertion fails, the code below removes its partial insert
+         * and restores both extracted inputs before returning FAIL.
+         */
+        ItemStack change = halfLayerStack(plan.halfLayerChange());
+        ItemStack changeRemainder = change.isEmpty()
+            ? ItemStack.EMPTY
+            : ItemHandlerHelper.insertItemStacked(inventory, change.copy(), false);
+        if (!changeRemainder.isEmpty()) {
+            int insertedChange = change.getCount() - changeRemainder.getCount();
+            removeHalfLayerChange(inventory, insertedChange, position);
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedHalfLayers,
+                "zinc paving half-layer credits"
+            );
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedZinc,
+                "zinc paving ingots"
+            );
+            logFailure("Could not store zinc conversion remainder at {}", position);
+            return Optional.empty();
+        }
+
+        return Optional.of(() -> {
+            removeHalfLayerChange(inventory, change.getCount(), position);
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedHalfLayers,
+                "zinc paving half-layer credits"
+            );
+            refundStack(
+                level,
+                position,
+                inventory,
+                extractedZinc,
+                "zinc paving ingots"
+            );
+        });
+    }
+
+    private static int countMatching(
+        IItemHandler inventory,
+        CopycatPavingMaterial material,
+        int limit
+    ) {
+        int count = 0;
+        for (int slot = 0; slot < inventory.getSlots() && count < limit; slot++) {
+            ItemStack stack = inventory.getStackInSlot(slot);
+            if (material.matches(stack)) {
+                count += Math.min(stack.getCount(), limit - count);
+            }
+        }
+        return count;
+    }
+
+    private static ItemStack halfLayerStack(int count) {
+        return count == 0
+            ? ItemStack.EMPTY
+            : new ItemStack(
+                CopycatPavingMaterial.HALF_LAYER.itemBlock().asItem(),
+                count
+            );
+    }
+
+    private static void removeHalfLayerChange(
+        IItemHandler inventory,
+        int count,
+        BlockPos position
+    ) {
+        if (count == 0) {
+            return;
+        }
+        ItemStack removed = ItemHelper.extract(
+            inventory,
+            CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
+            count,
+            false
+        );
+        if (removed.getCount() != count) {
+            logFailure(
+                "Could not roll back {} half-layer change items at {}",
+                count,
+                position
+            );
+        }
+    }
+
     private static int itemUnits(CopycatPavingMaterial material, BlockState state) {
         return switch (material) {
             case LAYER -> state.getValue(CopycatLayerBlock.LAYERS);
@@ -432,6 +980,16 @@ public final class CopycatLayerPavingService {
         ItemStack extracted,
         CopycatPavingMaterial material
     ) {
+        refundStack(level, position, inventory, extracted, material.toString());
+    }
+
+    private static void refundStack(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        ItemStack extracted,
+        String description
+    ) {
         if (extracted.isEmpty()) {
             return;
         }
@@ -447,7 +1005,7 @@ public final class CopycatLayerPavingService {
             CopycatRoller.LOGGER.error(
                 "Could not return {} {} items to mounted storage; dropped them at {}",
                 remainder.getCount(),
-                material,
+                description,
                 position
             );
         }
@@ -463,5 +1021,15 @@ public final class CopycatLayerPavingService {
         FAIL,
         PASS,
         SUCCESS
+    }
+
+    private enum PaymentSource {
+        DIRECT,
+        ZINC
+    }
+
+    @FunctionalInterface
+    private interface PaymentReceipt {
+        void rollback();
     }
 }

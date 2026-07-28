@@ -15,8 +15,9 @@
      `(Lnet/minecraft/world/item/ItemStack;)Z`
    - Injection: `HEAD`, cancellable; возвращает `true` только для точного
      предмета `CCBlocks.COPYCAT_LAYER`, `CCBlocks.COPYCAT_HALF_LAYER` или
-     `CCBlocks.COPYCAT_SLOPE_LAYER`. Для остальных предметов callback не
-     изменяется.
+     `CCBlocks.COPYCAT_SLOPE_LAYER`, а также для точного
+     `AllItems.ZINC_INGOT` (`create:zinc_ingot`). Для остальных предметов
+     callback не изменяется.
 
 2. `com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour`
 
@@ -25,7 +26,8 @@
    - Descriptor:
      `(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;)V`
    - Injection: `HEAD`, cancellable; отменяет только сочетание одного из
-     трёх точных фильтров Copycat Layer и `STRAIGHT_FILL`.
+     трёх точных фильтров Copycat Layer либо `create:zinc_ingot` и
+     `STRAIGHT_FILL`.
    - Shadow:
      `createHeightProfileForTracks(MovementContext): PaveTask`.
 

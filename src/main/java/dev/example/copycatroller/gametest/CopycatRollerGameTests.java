@@ -13,6 +13,7 @@ import com.copycatsplus.copycats.content.copycat.slope_layer.CopycatSlopeLayerBl
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlockEntity;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlockEntity;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.AllItems;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.RollerBlockEntity;
 import com.simibubi.create.content.contraptions.actors.roller.TrackPaverV2;
@@ -24,19 +25,23 @@ import com.simibubi.create.content.trains.track.BezierConnection;
 import com.simibubi.create.content.trains.track.TrackMaterial;
 import dev.example.copycatroller.CopycatRoller;
 import dev.example.copycatroller.CopycatRollerConfig;
+import dev.example.copycatroller.paving.CopycatPlacement;
 import dev.example.copycatroller.paving.CopycatLayerPavingService;
 import dev.example.copycatroller.paving.CopycatLayerPavingService.PlacementResult;
 import dev.example.copycatroller.paving.CopycatPavingMaterial;
 import dev.example.copycatroller.paving.LayerMath;
 import dev.example.copycatroller.paving.PreciseTrackHeightSampler;
 import dev.example.copycatroller.paving.RollerModeGate;
+import dev.example.copycatroller.paving.SurfacePlacement;
 import dev.example.copycatroller.paving.TrackSurfaceSample;
 import net.createmod.catnip.data.Couple;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
@@ -66,6 +71,19 @@ public final class CopycatRollerGameTests {
                 "Mechanical Roller rejected " + material
             );
         }
+        ItemStack zinc = new ItemStack(AllItems.ZINC_INGOT.get());
+        check(
+            helper,
+            invokeMaterialPredicate(roller, zinc),
+            "Mechanical Roller rejected the automatic zinc filter"
+        );
+        check(
+            helper,
+            BuiltInRegistries.ITEM.getKey(zinc.getItem()).equals(
+                ResourceLocation.fromNamespaceAndPath("create", "zinc_ingot")
+            ),
+            "Create zinc registry id is not create:zinc_ingot"
+        );
         helper.succeed();
     }
 
@@ -130,7 +148,7 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
-    public static void configurationDefaultsToDownAndOneBlock(GameTestHelper helper) {
+    public static void configurationDefaultsToSafeSurfaceOnlyMode(GameTestHelper helper) {
         check(
             helper,
             CopycatRollerConfig.ROUNDING_DIRECTION.get() == LayerMath.RoundingDirection.DOWN,
@@ -140,6 +158,17 @@ public final class CopycatRollerGameTests {
             helper,
             CopycatRollerConfig.FILL_DEPTH_BLOCKS.get() == 1,
             "default fill depth is not one block"
+        );
+        check(
+            helper,
+            CopycatRollerConfig.SURFACE_ONLY.get(),
+            "surface-only paving is not enabled by default"
+        );
+        check(
+            helper,
+            Math.abs(CopycatRollerConfig.SLOPE_MAX_VERTICAL_ERROR.get() - 0.25)
+                < 1.0e-9,
+            "default slope error is not one quarter block"
         );
         check(
             helper,
@@ -193,7 +222,7 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
-    public static void halfLayerSamplesBothHalvesOfTrackGradient(GameTestHelper helper) {
+    public static void halfLayerUsesSafeMinimumOfBothHalves(GameTestHelper helper) {
         TrackSurfaceSample risingEast = new TrackSurfaceSample(
             10,
             20,
@@ -203,13 +232,14 @@ public final class CopycatRollerGameTests {
             0.5,
             0
         );
-        Optional<BlockState> target = CopycatLayerPavingService.upperStateFor(
+        SurfacePlacement placement = CopycatLayerPavingService.surfacePlacementFor(
             CopycatPavingMaterial.HALF_LAYER,
             risingEast,
-            LayerMath.RoundingDirection.UP
-        );
-        check(helper, target.isPresent(), "half-layer gradient produced no upper state");
-        BlockState state = target.orElseThrow();
+            LayerMath.RoundingDirection.UP,
+            0.25
+        ).orElseThrow();
+        BlockState state = placement.state();
+        check(helper, placement.pos().getY() == 65, "half-layer selected the wrong surface cell");
         check(
             helper,
             state.getValue(CopycatHalfLayerBlock.AXIS) == Direction.Axis.X,
@@ -217,13 +247,300 @@ public final class CopycatRollerGameTests {
         );
         check(
             helper,
-            state.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS) == 3,
-            "negative half did not sample x - 1/4"
+            state.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS) == 2,
+            "negative half crossed its lowest track edge"
         );
         check(
             helper,
-            state.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS) == 5,
-            "positive half did not sample x + 1/4"
+            state.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS) == 4,
+            "positive half crossed its lowest track edge"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void zincSelectsLayerForEqualHalfHeights(GameTestHelper helper) {
+        CopycatPlacement placement = CopycatLayerPavingService.zincSurfacePlacementFor(
+            new TrackSurfaceSample(10, 20, 64.5, 1, 0, 0, 0),
+            LayerMath.RoundingDirection.DOWN
+        ).orElseThrow();
+
+        check(
+            helper,
+            placement.material() == CopycatPavingMaterial.LAYER,
+            "equal half heights did not collapse to Copycat Layer"
+        );
+        check(
+            helper,
+            placement.state().getValue(CopycatLayerBlock.LAYERS) == 3,
+            "equal half heights produced the wrong DOWN-rounded layer count"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void zincSelectsHalfLayerForUnequalHalfHeights(GameTestHelper helper) {
+        CopycatPlacement placement = CopycatLayerPavingService.zincSurfacePlacementFor(
+            new TrackSurfaceSample(10, 20, 64.5, 1, 0, 0.5, 0),
+            LayerMath.RoundingDirection.DOWN
+        ).orElseThrow();
+
+        check(
+            helper,
+            placement.material() == CopycatPavingMaterial.HALF_LAYER,
+            "unequal half heights incorrectly collapsed to Copycat Layer"
+        );
+        BlockState state = placement.state();
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.AXIS) == Direction.Axis.X,
+            "automatic Half Layer selected the wrong axis"
+        );
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS) == 1,
+            "automatic Half Layer selected the wrong negative height"
+        );
+        check(
+            helper,
+            state.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS) == 3,
+            "automatic Half Layer selected the wrong positive height"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void zincLayerPlacementStoresExactHalfLayerChange(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        ItemStackHandler inventory = zincInventory(1, 1);
+
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlaceWithZinc(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.LAYER,
+                CopycatLayerPavingService.stateFor(3),
+                inventory
+            ) == PlacementResult.SUCCESS,
+            "partial automatic Layer placement failed"
+        );
+        assertLayer(helper, position, 3);
+        check(helper, countZinc(inventory) == 0, "partial Layer did not consume one zinc ingot");
+        check(
+            helper,
+            countMaterial(inventory, CopycatPavingMaterial.HALF_LAYER) == 10,
+            "six credits did not leave ten Half Layer items as change"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void zincChangePaysForFollowingHalfLayer(GameTestHelper helper) {
+        BlockPos first = resetTarget(helper);
+        BlockPos second = first.above();
+        helper.getLevel().setBlockAndUpdate(second, Blocks.AIR.defaultBlockState());
+        ItemStackHandler inventory = zincInventory(2, 1);
+
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlaceWithZinc(
+                helper.getLevel(),
+                first,
+                CopycatPavingMaterial.LAYER,
+                CopycatLayerPavingService.stateFor(3),
+                inventory
+            ) == PlacementResult.SUCCESS,
+            "first zinc-funded Layer placement failed"
+        );
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlaceWithZinc(
+                helper.getLevel(),
+                second,
+                CopycatPavingMaterial.HALF_LAYER,
+                CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 2, 5),
+                inventory
+            ) == PlacementResult.SUCCESS,
+            "Half Layer could not spend stored conversion change"
+        );
+        assertHalfLayer(helper, second, Direction.Axis.X, 2, 5);
+        check(helper, countZinc(inventory) == 0, "following placement consumed an extra zinc ingot");
+        check(
+            helper,
+            countMaterial(inventory, CopycatPavingMaterial.HALF_LAYER) == 3,
+            "following seven-credit placement left the wrong change"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void fullZincPlacementsConsumeExactlyOneIngot(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        ItemStackHandler layerInventory = zincInventory(1, 1);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlaceWithZinc(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.LAYER,
+                CopycatLayerPavingService.stateFor(8),
+                layerInventory
+            ) == PlacementResult.SUCCESS,
+            "one zinc did not create eight ordinary layers"
+        );
+        check(helper, countZinc(layerInventory) == 0, "full Layer left zinc behind");
+        check(
+            helper,
+            countMaterial(layerInventory, CopycatPavingMaterial.HALF_LAYER) == 0,
+            "full Layer incorrectly created change"
+        );
+
+        helper.getLevel().setBlockAndUpdate(position, Blocks.AIR.defaultBlockState());
+        ItemStackHandler halfInventory = zincInventory(1, 1);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlaceWithZinc(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.HALF_LAYER,
+                CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 8, 8),
+                halfInventory
+            ) == PlacementResult.SUCCESS,
+            "one zinc did not create sixteen half layers"
+        );
+        check(helper, countZinc(halfInventory) == 0, "full Half Layer left zinc behind");
+        check(
+            helper,
+            countMaterial(halfInventory, CopycatPavingMaterial.HALF_LAYER) == 0,
+            "full Half Layer incorrectly created change"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void zincPlacementWithoutChangeSpaceIsAtomic(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        ItemStackHandler inventory = zincInventory(1, 2);
+
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlaceWithZinc(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.LAYER,
+                CopycatLayerPavingService.stateFor(3),
+                inventory
+            ) == PlacementResult.FAIL,
+            "zinc placement succeeded without space for conversion change"
+        );
+        check(helper, helper.getLevel().getBlockState(position).isAir(), "failed zinc placement changed the world");
+        check(helper, countZinc(inventory) == 2, "failed zinc placement lost or duplicated zinc");
+        check(
+            helper,
+            countMaterial(inventory, CopycatPavingMaterial.HALF_LAYER) == 0,
+            "failed zinc placement left conversion change behind"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void diagonalHalfLayerDoesNotProtrudeAcrossEitherHalf(GameTestHelper helper) {
+        TrackSurfaceSample diagonal = new TrackSurfaceSample(
+            10,
+            20,
+            64.5,
+            1,
+            1,
+            0.5,
+            0.5
+        );
+        SurfacePlacement placement = CopycatLayerPavingService.surfacePlacementFor(
+            CopycatPavingMaterial.HALF_LAYER,
+            diagonal,
+            LayerMath.RoundingDirection.UP,
+            0.25
+        ).orElseThrow();
+
+        check(helper, placement.pos().getY() == 65, "diagonal half layer selected the wrong cell");
+        check(
+            helper,
+            placement.state().getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS) == 0,
+            "negative diagonal half protrudes above the track plane"
+        );
+        check(
+            helper,
+            placement.state().getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS) == 2,
+            "positive diagonal half is not capped at its safe height"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void surfaceOnlyPlanPlacesNoFullBaseBelowPartialSurface(GameTestHelper helper) {
+        BlockPos basePosition = resetTarget(helper);
+        TrackSurfaceSample sample = new TrackSurfaceSample(
+            basePosition.getX(),
+            basePosition.getZ(),
+            basePosition.getY() + 0.5,
+            1,
+            0,
+            0.5,
+            0
+        );
+        SurfacePlacement placement = CopycatLayerPavingService.surfacePlacementFor(
+            CopycatPavingMaterial.LAYER,
+            sample,
+            LayerMath.RoundingDirection.DOWN,
+            0.25
+        ).orElseThrow();
+        ItemStackHandler inventory = inventory(8);
+
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                placement.pos(),
+                CopycatPavingMaterial.LAYER,
+                placement.state(),
+                inventory
+            ) == PlacementResult.SUCCESS,
+            "surface shell placement failed"
+        );
+        assertLayer(helper, placement.pos(), 1);
+        check(
+            helper,
+            helper.getLevel().getBlockState(placement.pos().below()).isAir(),
+            "surface-only placement created a full support block"
+        );
+        check(helper, count(inventory) == 7, "surface shell consumed more than its one layer");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void levelIntegerTrackSurfaceIsSkipped(GameTestHelper helper) {
+        TrackSurfaceSample level = new TrackSurfaceSample(10, 20, 64, 1, 0, 0, 0);
+        for (CopycatPavingMaterial material : CopycatPavingMaterial.values()) {
+            check(
+                helper,
+                CopycatLayerPavingService.surfacePlacementFor(
+                    material,
+                    level,
+                    LayerMath.RoundingDirection.DOWN,
+                    0.25
+                ).isEmpty(),
+                "level integer track created a needless full " + material
+            );
+        }
+        check(
+            helper,
+            CopycatLayerPavingService.surfacePlacementFor(
+                CopycatPavingMaterial.SLOPE_LAYER,
+                new TrackSurfaceSample(10, 20, 64.5, 1, 0, 0, 0),
+                LayerMath.RoundingDirection.UP,
+                0.25
+            ).isEmpty(),
+            "level fractional track created an artificial Slope Layer wedge"
         );
         helper.succeed();
     }
@@ -336,6 +653,56 @@ public final class CopycatRollerGameTests {
             helper,
             target.getValue(CopycatSlopeLayerBlock.LAYERS) == 6,
             "three-quarter slope did not use layers=6"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void slopeQualityGateSkipsSawtoothState(GameTestHelper helper) {
+        TrackSurfaceSample betweenRepresentableShapes = new TrackSurfaceSample(
+            10,
+            20,
+            64.5,
+            1,
+            0,
+            0.25,
+            0
+        );
+        check(
+            helper,
+            CopycatLayerPavingService.surfacePlacementFor(
+                CopycatPavingMaterial.SLOPE_LAYER,
+                betweenRepresentableShapes,
+                LayerMath.RoundingDirection.DOWN,
+                0.25
+            ).isEmpty(),
+            "slope quality gate accepted a sawtooth state"
+        );
+
+        TrackSurfaceSample representable = new TrackSurfaceSample(
+            10,
+            20,
+            64.25,
+            1,
+            0,
+            0.25,
+            0
+        );
+        SurfacePlacement placement = CopycatLayerPavingService.surfacePlacementFor(
+            CopycatPavingMaterial.SLOPE_LAYER,
+            representable,
+            LayerMath.RoundingDirection.DOWN,
+            0.25
+        ).orElseThrow();
+        check(
+            helper,
+            placement.state().getValue(CopycatSlopeLayerBlock.LAYERS) == 1,
+            "representable quarter slope selected the wrong state"
+        );
+        check(
+            helper,
+            placement.state().getValue(CopycatSlopeLayerBlock.FACING) == Direction.EAST,
+            "representable quarter slope faces downhill"
         );
         helper.succeed();
     }
@@ -701,8 +1068,39 @@ public final class CopycatRollerGameTests {
         return inventory;
     }
 
+    private static ItemStackHandler zincInventory(int slots, int count) {
+        ItemStackHandler inventory = new ItemStackHandler(slots);
+        inventory.setStackInSlot(0, new ItemStack(AllItems.ZINC_INGOT.get(), count));
+        return inventory;
+    }
+
     private static int count(ItemStackHandler inventory) {
         return inventory.getStackInSlot(0).getCount();
+    }
+
+    private static int countZinc(ItemStackHandler inventory) {
+        int count = 0;
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            ItemStack stack = inventory.getStackInSlot(slot);
+            if (CopycatLayerPavingService.isZincIngot(stack)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private static int countMaterial(
+        ItemStackHandler inventory,
+        CopycatPavingMaterial material
+    ) {
+        int count = 0;
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            ItemStack stack = inventory.getStackInSlot(slot);
+            if (material.matches(stack)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
     }
 
     private static void assertLayer(GameTestHelper helper, BlockPos position, int layers) {

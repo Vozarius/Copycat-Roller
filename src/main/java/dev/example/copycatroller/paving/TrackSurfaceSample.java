@@ -49,12 +49,73 @@ public record TrackSurfaceSample(
         return longitudinalAxis() == Direction.Axis.X ? gradientX : gradientZ;
     }
 
-    public double negativeHalfSurfaceY() {
-        return surfaceY - gradientAlongAxis() * 0.25;
+    /**
+     * Minimum profile Y under one longitudinal half of this X/Z cell.
+     *
+     * <p>Using the minimum instead of the half's centre prevents a rectangular
+     * Half Layer from crossing the rail plane at diagonal and curved track.</p>
+     */
+    public double minimumHalfSurfaceY(boolean positiveHalf) {
+        if (longitudinalAxis() == Direction.Axis.X) {
+            return minimumSurfaceY(
+                positiveHalf ? 0 : -0.5,
+                positiveHalf ? 0.5 : 0,
+                -0.5,
+                0.5
+            );
+        }
+        return minimumSurfaceY(
+            -0.5,
+            0.5,
+            positiveHalf ? 0 : -0.5,
+            positiveHalf ? 0.5 : 0
+        );
     }
 
-    public double positiveHalfSurfaceY() {
-        return surfaceY + gradientAlongAxis() * 0.25;
+    public double minimumCellSurfaceY() {
+        return minimumSurfaceY(-0.5, 0.5, -0.5, 0.5);
+    }
+
+    public double lowSlopeEdgeSurfaceY() {
+        Direction uphill = uphillDirection();
+        return slopeEdgeSurfaceY(uphill.getOpposite());
+    }
+
+    public double highSlopeEdgeSurfaceY() {
+        return slopeEdgeSurfaceY(uphillDirection());
+    }
+
+    private double slopeEdgeSurfaceY(Direction edge) {
+        if (edge.getAxis() != longitudinalAxis()) {
+            throw new IllegalArgumentException("slope edge must use the longitudinal axis");
+        }
+        if (longitudinalAxis() == Direction.Axis.X) {
+            return surfaceY
+                + gradientX * edge.getStepX() * 0.5
+                - Math.abs(gradientZ) * 0.5;
+        }
+        return surfaceY
+            + gradientZ * edge.getStepZ() * 0.5
+            - Math.abs(gradientX) * 0.5;
+    }
+
+    private double minimumSurfaceY(
+        double minimumX,
+        double maximumX,
+        double minimumZ,
+        double maximumZ
+    ) {
+        return surfaceY
+            + minimumContribution(gradientX, minimumX, maximumX)
+            + minimumContribution(gradientZ, minimumZ, maximumZ);
+    }
+
+    private static double minimumContribution(
+        double gradient,
+        double minimumOffset,
+        double maximumOffset
+    ) {
+        return gradient * (gradient >= 0 ? minimumOffset : maximumOffset);
     }
 
     /**
