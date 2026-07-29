@@ -1,18 +1,17 @@
-# Исследование API целевых версий
+# Target-Version API Research
 
-Исходники проверены до реализации, без переноса mapped-имён из другой
-версии Minecraft.
+The source code was inspected before implementation without transferring
+mapped names from another Minecraft version.
 
-## Зафиксированные исходники
+## Pinned Sources
 
 - Create 6 artifacts for Minecraft 1.21.1 from the official Create Maven.
-- Copycats+ 3.0.4 для Minecraft 1.21.1: tag `v3.0.4+mc1.21.1`,
-  commit `9f808ac0b437817696c50f2e8b57f590b1196094`, CurseForge file
-  `7251823`.
+- Copycats+ 3.0.4 for Minecraft 1.21.1: tag `v3.0.4+mc1.21.1`, commit
+  `9f808ac0b437817696c50f2e8b57f590b1196094`, CurseForge file `7251823`.
 
 ## Create 6
 
-Проверенные сигнатуры:
+Verified signatures:
 
 ```java
 // RollerBlockEntity
@@ -71,46 +70,45 @@ public static ItemStack extract(
 public CombinedInvWrapper getAllItems();
 ```
 
-`MovementContext` в этой версии предоставляет публичные `world`, `state`,
-`localPos`, `blockEntityData`, `data`, `contraption` и `stall`.
-Основной mounted inventory получается через
+In this version, `MovementContext` exposes the public fields `world`, `state`,
+`localPos`, `blockEntityData`, `data`, `contraption`, and `stall`. The main
+mounted inventory is obtained through
 `context.contraption.getStorage().getAllItems()`.
 
-Декомпиляция `tryFill` подтверждает, что Create 6 извлекает один
-предмет, совпавший с фильтром, и устанавливает возвращённый
-`getStateToPaveWith(...)` state. Отдельного runtime-банка либо механизма
-возврата остатка для преобразования блока в несколько частичных блоков в
-этой ветке нет. Поэтому цинковая совместимость использует собственную
-атомарную конверсию непосредственно в mounted inventory.
+Decompilation of `tryFill` confirms that Create 6 extracts one item matching
+the filter and places the state returned by `getStateToPaveWith(...)`. This
+branch has no separate runtime bank or remainder-return mechanism for
+converting one block into multiple partial blocks. Zinc compatibility
+therefore performs its own atomic conversion directly in the mounted
+inventory.
 
-`RollingMode` package-private и имеет порядок
-`TUNNEL_PAVE`, `STRAIGHT_FILL`, `WIDE_FILL`. Создание mixin-класса в пакете
-Create приводит к JPMS split-package, поэтому ordinal `1` изолирован в
-`RollerModeGate`; GameTest сравнивает весь runtime-порядок enum и падает при
-его изменении.
+`RollingMode` is package-private and ordered as `TUNNEL_PAVE`,
+`STRAIGHT_FILL`, `WIDE_FILL`. Placing a mixin class in Create's package causes
+a JPMS split-package error, so ordinal `1` is isolated in `RollerModeGate`. A
+GameTest compares the complete runtime enum order and fails if it changes.
 
-### Семантика профиля
+### Profile Semantics
 
-`createHeightProfileForTracks()` создаёт `PaveTask`, передаёт в
-`TrackPaverV2.pave()` фактические `TrackEdge` и затем добавляет
-`context.localPos.getY()` к Y каждого столбца.
+`createHeightProfileForTracks()` creates a `PaveTask`, passes the actual
+`TrackEdge` instances to `TrackPaverV2.pave()`, and then adds
+`context.localPos.getY()` to the Y value of every column.
 
-Прямая ветка сначала вычисляет позицию ребра как `double`, применяет
-вертикальный offset (`1` для уклона, `0.5` для ровного ребра), затем
-преобразует результат в `BlockPos`. Кривая проходит LUT-сегменты, выбирает
-минимальный Y для повторно покрытой X/Z-ячейки, а перед записью в `PaveTask`
-округляет Y до целого или половины блока.
+The straight branch first calculates the edge position as a `double`, applies
+the vertical offset (`1` for a slope and `0.5` for a level edge), and then
+converts the result to a `BlockPos`. The curve branch traverses LUT segments,
+selects the minimum Y for an X/Z cell covered more than once, and rounds Y to
+a whole or half block before writing it to `PaveTask`.
 
-Штатный Roller трактует значение профиля как Y базового полного блока и
-при дробной части около `0.5` добавляет нижнюю плиту сверху. В legacy-режиме
-`surfaceOnly=false` аддон сохраняет эту схему. В режиме по умолчанию
-физическая верхняя поверхность считается как `profileY + 1`, после чего
-выбирается только её самая высокая занятая ячейка; полный базовый блок не
-ставится.
+The standard Roller interprets the profile value as the Y of the full base
+block and adds a lower slab above it when the fractional part is approximately
+`0.5`. In legacy mode, `surfaceOnly=false`, the addon preserves this layout.
+In the default mode, the physical top surface is calculated as
+`profileY + 1`; only its highest occupied cell is then selected, and the full
+base block is not placed.
 
 ## Copycats+ 3.0.4
 
-Проверенные элементы:
+Verified elements:
 
 ```java
 public static final BlockEntry<CopycatLayerBlock> COPYCAT_LAYER;
@@ -173,33 +171,32 @@ static ItemRequirement ICopycatBlock.getRequiredItemsForLayer(
 );
 ```
 
-`ICopycatBlockEntity.init()` устанавливает материал
-`AllBlocks.COPYCAT_BASE.getDefaultState()`, пустой `consumedItem` и включает
-connected textures. `hasCustomMaterial()` возвращает `false` именно для
-стандартного `COPYCAT_BASE`.
+`ICopycatBlockEntity.init()` sets the material to
+`AllBlocks.COPYCAT_BASE.getDefaultState()`, clears `consumedItem`, and enables
+connected textures. `hasCustomMaterial()` returns `false` specifically for
+the standard `COPYCAT_BASE`.
 
-`CopycatLayerBlock.getRequiredItems()` делегирует
-`ICopycatBlock.getRequiredItemsForLayer(state, LAYERS)`. Реализация создаёт
-ровно `LAYERS` требований типа `CONSUME`, что подтверждает стоимость
-`layers=N -> N` предметов. В runtime аддон не использует
-`SpecialBlockItemRequirement`; списание производится транзакционно из
-mounted inventory.
+`CopycatLayerBlock.getRequiredItems()` delegates to
+`ICopycatBlock.getRequiredItemsForLayer(state, LAYERS)`. The implementation
+creates exactly `LAYERS` requirements of type `CONSUME`, confirming a cost of
+`layers=N -> N` items. The addon does not use
+`SpecialBlockItemRequirement` at runtime; items are consumed transactionally
+from the mounted inventory.
 
-`CopycatSlopeLayerBlock.getRequiredItems()` использует ту же функцию и
-поэтому также стоит `LAYERS` предметов. `CopycatHalfLayerBlock` объединяет
-два независимых требования:
+`CopycatSlopeLayerBlock.getRequiredItems()` uses the same function and
+therefore also costs `LAYERS` items. `CopycatHalfLayerBlock` combines two
+independent requirements:
 
 ```java
 getRequiredItemsForLayer(state, POSITIVE_LAYERS)
     .union(getRequiredItemsForLayer(state, NEGATIVE_LAYERS));
 ```
 
-Его полная стоимость равна `positive_layers + negative_layers`; полный блок
-`8 + 8` требует 16 предметов `copycat_half_layer`. Свойства обеих половин
-официально допускают `0..8`, хотя ненулевой новый блок всегда содержит хотя
-бы одну половину.
+Its total cost is `positive_layers + negative_layers`; a full `8 + 8` block
+requires 16 `copycat_half_layer` items. Both half properties officially allow
+`0..8`, although a new nonempty block always contains at least one half.
 
-Проверены JSON-рецепты внутри JAR Copycats+ 3.0.4:
+The JSON recipes inside the Copycats+ 3.0.4 JAR were verified:
 
 ```text
 c:ingots/zinc -> 8 × copycats:copycat_layer
@@ -207,13 +204,13 @@ c:ingots/zinc -> 16 × copycats:copycat_half_layer
 2 × copycats:copycat_half_layer -> 1 × copycats:copycat_layer
 ```
 
-Регистр Create подтверждает точный предмет `create:zinc_ingot`. Поэтому
-Half Layer является минимальной целой единицей для безостаточного банка:
-один слиток равен 16 единицам, Half Layer стоит одну, обычный Layer — две.
-Сдача сохраняется реальными Half Layer items, без собственного NBT или
-скрытого счётчика аддона.
+Create's registry confirms the exact item `create:zinc_ingot`. Half Layer is
+therefore the smallest integral unit for a lossless material bank: one ingot
+equals 16 units, a Half Layer costs one, and a standard Layer costs two.
+Change is preserved as real Half Layer items without custom NBT or a hidden
+addon counter.
 
-`CCShapes.SLOPE_LAYER` подтверждает точные высоты краёв нижней формы:
+`CCShapes.SLOPE_LAYER` confirms the exact edge heights of the lower shape:
 
 ```text
 layers:     1    2    3    4    5    6    7    8
@@ -221,10 +218,11 @@ low edge:   0    0    0    0   1/4  1/2  3/4   1
 high edge: 1/4  1/2  3/4   1    1    1    1    1
 ```
 
-Именно эти края используются quality gate аддона; предположение о восьми
-параллельных склонах не делается.
+These exact edges are used by the addon's quality gate; it does not assume
+eight parallel slopes.
 
-Half Layer создаёт `MultiStateCopycatBlockEntity`, остальные два слоя —
-`CCCopycatBlockEntity`. Для проверки пустого материала используется общий
-`ICopycatBlockEntity.hasCustomMaterial()`, а у multistate BE дополнительно
-проверяется пустой список `MaterialItemStorage.getAllConsumedItems()`.
+Half Layer creates a `MultiStateCopycatBlockEntity`; the other two layer types
+create a `CCCopycatBlockEntity`. Empty material is verified with the common
+`ICopycatBlockEntity.hasCustomMaterial()` method. For a multistate block
+entity, the addon additionally checks that
+`MaterialItemStorage.getAllConsumedItems()` is empty.

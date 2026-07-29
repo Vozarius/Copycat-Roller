@@ -1,6 +1,6 @@
-# Отчёт о сборке и тестах
+# Build and Test Report
 
-Среда проверки:
+Test environment:
 
 - Windows 11 amd64
 - Oracle JDK 21.0.9 LTS
@@ -10,7 +10,7 @@
 - Create 6
 - Copycats+ 3.0.4
 
-## Итоговые команды
+## Commands
 
 ```powershell
 .\gradlew.bat test
@@ -18,139 +18,145 @@
 .\gradlew.bat build
 ```
 
-Финальный объединённый прогон:
+Final combined run:
 
 ```powershell
 .\gradlew.bat build runGameTestServer --console=plain
 ```
 
-Финальная чистая проверка версии 1.4.0:
+Final clean verification of version 1.4.0:
 
 ```powershell
 .\gradlew.bat clean build runGameTestServer --console=plain
 ```
 
-Результат: `BUILD SUCCESSFUL in 31s`; все 23 unit-теста прошли, dedicated
-GameTest-сервер завершил `34/34` обязательных теста за `586.2 ms`.
+Result: `BUILD SUCCESSFUL in 31s`; all 23 unit tests passed, and the dedicated
+GameTest server completed all `34/34` required tests in `586.2 ms`.
 
-Дополнительно выполнены проверки на нижней совместимой с Copycats+ сборке
-Create 6 и на верхней доступной сборке Create 6. В обоих случаях проект
-собрался, dedicated server запустился и завершил `34/34` GameTests. Сам аддон
-объявляет диапазон всей ветки Create 6; фактическую нижнюю границу сборки
-модпака дополнительно ограничивают зависимости Copycats+.
+Additional checks were performed with both the lowest Copycats+-compatible
+Create 6 build and the highest available Create 6 build. In both cases, the
+project built successfully, the dedicated server started, and all `34/34`
+GameTests passed. The addon declares the complete Create 6 branch as its
+range; Copycats+ dependencies impose an additional effective lower bound on
+the assembled modpack.
 
-Артефакты:
+Artifacts:
 
-- `build/libs/copycat_roller-1.4.0.jar` — 72 475 байт;
-- `build/libs/copycat_roller-1.4.0-sources.jar` — 34 557 байт;
-- SHA-256 основного JAR:
+- `build/libs/copycat_roller-1.4.0.jar` — 72,475 bytes;
+- `build/libs/copycat_roller-1.4.0-sources.jar` — 34,557 bytes;
+- SHA-256 of the main JAR:
   `E388EED61C3D7FA45DA4912F036FB1D4B92C2EC60F0A5DAABA8B4FF5D1E40AB1`.
 
-## Unit-тесты
+## Unit Tests
 
-`LayerMathTest` проверяет:
+`LayerMathTest` verifies:
 
-- режимы `DOWN` и `UP` на значениях от `0.0` до `0.999999`;
-- шум около границ 1/8;
-- отрицательные мировые Y;
-- переход через целую координату;
-- квантизацию высот отрицательной и положительной половин Half Layer,
-  включая выход за границы ячейки;
-- значение `DOWN` как default для чистой математики;
-- эквивалентность штатной нижней плите при `fraction=0.5`:
-  `layers=8` снизу и `layers=4` сверху в режиме `UP`.
+- `DOWN` and `UP` modes for values from `0.0` through `0.999999`;
+- noise around 1/8 boundaries;
+- negative world Y coordinates;
+- transitions across an integer coordinate;
+- height quantization for the negative and positive halves of a Half Layer,
+  including values that cross cell boundaries;
+- `DOWN` as the default for pure mathematical operations;
+- equivalence to the standard lower-slab behavior at `fraction=0.5`:
+  `layers=8` below and `layers=4` above in `UP` mode.
 
-`PavingLimitsTest` проверяет default в один ближайший блок, пользовательскую
-глубину и ограничение штатным `rollerFillDepth + 1`.
+`PavingLimitsTest` verifies the default depth of one nearest block, a custom
+depth, and the standard `rollerFillDepth + 1` limit.
 
-`SlopeLayerGeometryTest` проверяет:
+`SlopeLayerGeometryTest` verifies:
 
-- точные высоты низкого и высокого краёв всех восьми состояний Copycats+;
-- выбор представимых уклонов 1/4 и 1/2;
-- пропуск промежуточного состояния, создающего «пилу»;
-- невозможность выбрать состояние, пересекающее любой край профиля.
+- the exact low- and high-edge heights of all eight Copycats+ states;
+- selection of representable 1/4 and 1/2 slopes;
+- rejection of an intermediate state that would create a sawtooth;
+- rejection of any state that intersects either edge of the profile.
 
-`ZincCreditMathTest` проверяет:
+`ZincCreditMathTest` verifies:
 
-- стоимость обычного Layer по две половинчатые единицы за слой;
-- стоимость обеих сторон Half Layer по одной единице;
-- точную сдачу из одного или нескольких цинковых слитков;
-- приоритет уже сохранённых Half Layer items перед новым слитком;
-- закон сохранения для всех стоимостей `1..16` и запасов сдачи `0..16`;
-- отказ на некорректных входных значениях.
+- the cost of a standard Layer at two half-layer units per layer;
+- the cost of both Half Layer sides at one unit each;
+- exact change from one or more zinc ingots;
+- priority of previously stored Half Layer items over a new ingot;
+- conservation for all costs in `1..16` and stored-change amounts in `0..16`;
+- rejection of invalid input values.
 
 ## NeoForge GameTests
 
-Набор состоит из 34 обязательных тестов:
+The suite contains 34 required tests:
 
-1. точные Layer, Half Layer, Slope Layer и `create:zinc_ingot` принимаются
-   фильтром Roller; точный registry ID цинка подтверждён;
-2. другой неполный copycat отклоняется;
-3. горизонтальный профиль не создаёт частичный верхний слой;
-4. половинный уклон создаёт `layers=4` сверху;
-5. значения конфигурации по умолчанию: `DOWN`, `surfaceOnly=true`, один
-   ближайший блок и допуск Slope Layer `0.25`;
-6. состояния обычного Layer для 1/8…7/8;
-7. независимые свойства и точная суммарная стоимость Half Layer;
-8. консервативная минимальная высота обеих половин Half Layer;
-9. защита Half Layer от выступа на диагональном/поперечном уклоне;
-10. верхняя оболочка без полного базового блока и без лишнего расхода;
-11. пропуск полного состояния на ровном целочисленном профиле;
-12. атомарное и инкрементальное наращивание Half Layer;
-13. `facing` Slope Layer в сторону повышения и `layers=4` для 1/2;
-14. разворот `facing` Slope Layer при смене знака уклона;
-15. пропуск состояния Slope Layer, создающего «пилу», и сохранение
-    представимого четверть-склона;
-16. стоимость полного Half Layer `16` и полного Slope Layer `8`;
-17. защита пользовательского материала multistate Half Layer;
-18. расход `N` обычного Layer;
-19. расход восьми для полного обычного Layer;
-20. атомарный отказ при недостатке;
-21. наращивание обычного Layer 3 → 6 за три предмета;
-22. защита пользовательского материала обычного Layer;
-23. идемпотентный повторный проход;
-24. защита незагруженного chunk;
-25. защита твёрдого блока и портала;
-26. совпадение X/Z-покрытия диагонали и Bezier с Create, сохранение
-    неокруглённого Y, касательной и направления градиента;
-27. строгая область compat-ветки и runtime-порядок `RollingMode`;
-28. classloading общего кода на dedicated GameTest server.
-29. равные высоты обеих половин в цинковом режиме дают обычный Layer;
-30. разные высоты дают Half Layer с правильной осью и двумя значениями;
-31. частичный обычный Layer расходует один слиток и сохраняет точную сдачу;
-32. следующая Half Layer-операция расходует сохранённую сдачу без нового
-    слитка;
-33. один слиток даёт ровно полный Layer `layers=8` либо полный Half Layer
-    `8 + 8`, без сдачи;
-34. отсутствие места для сдачи атомарно отменяет операцию без изменения
-    мира или инвентаря.
+1. the exact Layer, Half Layer, Slope Layer, and `create:zinc_ingot` items are
+   accepted by the Roller filter, and the exact zinc registry ID is confirmed;
+2. another partial Copycat block remains rejected;
+3. a horizontal profile does not create a partial upper layer;
+4. a half-block slope creates `layers=4` above;
+5. default configuration values are `DOWN`, `surfaceOnly=true`, one nearest
+   block, and a Slope Layer tolerance of `0.25`;
+6. standard Layer states are correct for 1/8 through 7/8;
+7. Half Layer properties remain independent and their combined cost is exact;
+8. both Half Layer halves use a conservative minimum height;
+9. Half Layer does not protrude on a diagonal or transverse slope;
+10. only the upper shell is placed, without a full base block or excess cost;
+11. a full state is skipped on a level profile at an integer height;
+12. Half Layer growth is atomic and incremental;
+13. Slope Layer `facing` points uphill and `layers=4` represents 1/2;
+14. Slope Layer `facing` reverses when the slope direction changes;
+15. a Slope Layer state that would create a sawtooth is skipped, while a
+    representable quarter-slope is retained;
+16. a full Half Layer costs `16` and a full Slope Layer costs `8`;
+17. a user-assigned material in a multistate Half Layer is protected;
+18. a standard Layer with `layers=N` consumes `N` items;
+19. a full standard Layer consumes eight items;
+20. insufficient inventory causes an atomic rejection;
+21. growing a standard Layer from 3 to 6 costs three items;
+22. a user-assigned material in a standard Layer is protected;
+23. repeating a pass is idempotent;
+24. an unloaded chunk is protected;
+25. a solid block and a portal are protected;
+26. diagonal and Bezier X/Z coverage matches Create while preserving
+    unrounded Y, the tangent, and the gradient direction;
+27. the compatibility branch has a strict scope, and the runtime
+    `RollingMode` order is verified;
+28. common code loads on a dedicated GameTest server;
+29. equal heights on both halves in zinc mode produce a standard Layer;
+30. unequal heights produce a Half Layer with the correct axis and two layer
+    values;
+31. a partial standard Layer consumes one ingot and preserves exact change;
+32. the next Half Layer operation consumes the preserved change without
+    requiring a new ingot;
+33. one ingot produces exactly either a full Layer with `layers=8` or a full
+    Half Layer with `8 + 8`, with no change;
+34. insufficient space for change atomically cancels the operation without
+    changing the world or inventory.
 
-## Диагностические итерации
+## Diagnostic Iterations
 
-- Первоначальная зависимость от отсутствующего classifier `slim` для Create
-  была заменена на полный официальный artifact.
-- Попытка поместить mixin в Java-пакет Create была отклонена JPMS как
-  split-package; mixins перенесены в пакет аддона, ordinal режима
-  централизован и защищён GameTest.
-- Расширенный тест горизонтального профиля обнаружил служебную половину
-  блока Create. Sampler исправлен так, чтобы offset выбора `BlockPos` не
-  создавал ложные четыре слоя на ровном пути.
-- Первый расширенный GameTest-прогон завершил 23/24 теста: вспомогательная
-  позиция полного Slope Layer находилась за очищаемой областью шаблона.
-  Позиция перенесена внутрь тестовой колонки; повторный и финальный чистый
-  прогоны завершили 24/24.
-- Первый чистый прогон 1.3.0 обнаружил фиксированные мировые X/Z во
-  вспомогательном тесте верхней оболочки. При случайном размещении шаблона
-  эта позиция попадала в незагруженный chunk. Тест переведён на
-  `helper.absolutePos(...)`; повторный чистый прогон завершил 28/28.
-- Цинковый режим сначала проверял место для сдачи до извлечения слитка.
-  Это ошибочно отклоняло корректный случай одного слитка в единственном
-  слоте: сам слиток после извлечения освобождает место. Порядок изменён на
-  синхронное извлечение, вставку сдачи и полный откат при отказе; отдельные
-  GameTests подтверждают успешный односотовый случай и атомарный отказ,
-  когда стек из двух слитков слот не освобождает.
+- The initial dependency on a missing `slim` classifier for Create was
+  replaced with the complete official artifact.
+- An attempt to place a mixin in Create's Java package was rejected by JPMS as
+  a split package. The mixins were moved into the addon's package, the mode
+  ordinal was centralized, and a GameTest now guards it.
+- The extended horizontal-profile test found Create's internal half-block
+  offset. The sampler was corrected so that the offset used to select a
+  `BlockPos` does not create a false four-layer surface on level track.
+- The first extended GameTest run completed 23 of 24 tests: the auxiliary full
+  Slope Layer position was outside the template's cleared area. The position
+  was moved inside the test column; the repeated and final clean runs
+  completed all 24 of 24 tests.
+- The first clean 1.3.0 run found fixed world X/Z coordinates in the auxiliary
+  upper-shell test. With randomized template placement, the position could
+  fall into an unloaded chunk. The test was changed to
+  `helper.absolutePos(...)`; the repeated clean run completed all 28 of 28
+  tests.
+- Zinc mode initially checked for change-storage capacity before extracting
+  the ingot. That incorrectly rejected the valid case of one ingot in the
+  only slot, because extracting the ingot itself frees the slot. The operation
+  order was changed to synchronous extraction, change insertion, and full
+  rollback on failure. Dedicated GameTests confirm both the successful
+  single-slot case and the atomic failure when a stack of two ingots does not
+  free the slot.
 
-В server log остаются предупреждения из mixin-конфигураций Copycats+,
-Flywheel и Ponder (compatibility-level, повторные `@Unique`, отсутствующий
-dev refmap Ponder). Они воспроизводятся без аддона, не относятся к трём
-mixin-классам Copycat Roller и не помешали применению инъекций или тестам.
+The server log still contains warnings from the Copycats+, Flywheel, and
+Ponder mixin configurations: compatibility level, repeated `@Unique`
+annotations, and a missing Ponder development refmap. These warnings also
+occur without the addon, do not involve any of Copycat Roller's three mixin
+classes, and did not prevent the injections or tests from succeeding.

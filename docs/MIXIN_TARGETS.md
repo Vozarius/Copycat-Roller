@@ -1,9 +1,8 @@
-# Mixin targets
+# Mixin Targets
 
-Конфигурация: `copycat_roller.mixins.json`. Все инъекции имеют `require=1`,
-а конфигурация также задаёт `defaultRequire=1`. Plugin применяет mixins
-только когда в `LoadingModList` одновременно присутствуют `create` и
-`copycats`.
+Configuration: `copycat_roller.mixins.json`. Every injection uses `require=1`,
+and the configuration also sets `defaultRequire=1`. The plugin applies the
+mixins only when both `create` and `copycats` are present in `LoadingModList`.
 
 ## Targets
 
@@ -13,11 +12,11 @@
    - Method: `isValidMaterial`
    - Descriptor:
      `(Lnet/minecraft/world/item/ItemStack;)Z`
-   - Injection: `HEAD`, cancellable; возвращает `true` только для точного
-     предмета `CCBlocks.COPYCAT_LAYER`, `CCBlocks.COPYCAT_HALF_LAYER` или
-     `CCBlocks.COPYCAT_SLOPE_LAYER`, а также для точного
-     `AllItems.ZINC_INGOT` (`create:zinc_ingot`). Для остальных предметов
-     callback не изменяется.
+   - Injection: cancellable `HEAD`; returns `true` only for the exact
+     `CCBlocks.COPYCAT_LAYER`, `CCBlocks.COPYCAT_HALF_LAYER`, or
+     `CCBlocks.COPYCAT_SLOPE_LAYER` item, as well as the exact
+     `AllItems.ZINC_INGOT` item (`create:zinc_ingot`). The callback remains
+     unchanged for all other items.
 
 2. `com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour`
 
@@ -25,8 +24,8 @@
    - Method: `triggerPaver`
    - Descriptor:
      `(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;)V`
-   - Injection: `HEAD`, cancellable; отменяет только сочетание одного из
-     трёх точных фильтров Copycat Layer либо `create:zinc_ingot` и
+   - Injection: cancellable `HEAD`; cancels only the combination of one of the
+     three exact Copycat Layer filters or `create:zinc_ingot` with
      `STRAIGHT_FILL`.
    - Shadow:
      `createHeightProfileForTracks(MovementContext): PaveTask`.
@@ -37,9 +36,9 @@
    - Method: `pave`
    - Descriptor:
      `(Lcom/simibubi/create/content/contraptions/actors/roller/PaveTask;Lcom/simibubi/create/content/trains/graph/TrackGraph;Lcom/simibubi/create/content/trains/graph/TrackEdge;DD)V`
-   - Injection: статический `HEAD`; сохраняет точный Y, локальную касательную
-     и горизонтальный градиент до того, как Create сведёт Y к `BlockPos` или
-     половине блока.
+   - Injection: static `HEAD`; preserves the precise Y, local tangent, and
+     horizontal gradient before Create reduces Y to a `BlockPos` or half-block
+     step.
 
-Больших `@Overwrite` нет. Сторонние методы `tryFill`,
-`getStateToPaveWith` и `getMode` не заменяются.
+There are no large `@Overwrite` methods. The third-party methods `tryFill`,
+`getStateToPaveWith`, and `getMode` are not replaced.
