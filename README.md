@@ -1,51 +1,57 @@
 # Copycat Roller
 
-Самостоятельный NeoForge-аддон, добавляющий точное мощение тремя блоками
-Copycats+ для Mechanical Roller из Create:
+A NeoForge addon that integrates Create's Mechanical Roller with adjustable
+layers from Copycats+.
 
-- `copycats:copycat_layer`;
-- `copycats:copycat_half_layer`;
-- `copycats:copycat_slope_layer`.
+It preserves fractional track heights and can pave straight, diagonal, and
+curved railway sections in 1/8-block increments.
 
-Дополнительный автоматический фильтр `create:zinc_ingot` сам выбирает
-обычный Layer или Half Layer по локальному профилю пути.
+For a player-focused overview with screenshots, see:
 
-## Поддерживаемая среда
+- [Modrinth description — English](MODRINTH.md)
+- [Modrinth description — Russian](MODRINTH_RU.md)
+
+## Supported Filters
+
+The compatibility branch accepts:
+
+- `copycats:copycat_layer`
+- `copycats:copycat_half_layer`
+- `copycats:copycat_slope_layer`
+- `create:zinc_ingot` for automatic Layer/Half Layer selection
+
+It is active only in `STRAIGHT_FILL` mode. Other Roller modes and filter
+materials retain their original Create behavior.
+
+## Requirements
 
 - Minecraft `1.21.1`
-- NeoForge `21.1.x` (проект собирается с `21.1.219`)
+- NeoForge `21.1.x`
 - Create `6.0.11`
 - Copycats+ `3.0.4`
 - Java `21`
 
-Диапазоны обязательных зависимостей зафиксированы в
-`META-INF/neoforge.mods.toml`: Create `[6.0.11,6.0.12)`, Copycats+
-`[3.0.4,3.0.5)`, NeoForge `[21.1.0,21.2.0)`.
+The dependency ranges in `neoforge.mods.toml` intentionally restrict the
+addon to the tested Create and Copycats+ releases.
 
-## Установка
+## Installation
 
-1. Установите NeoForge 21.1.x для Minecraft 1.21.1.
-2. Поместите в `mods` Create 6.0.11, Copycats+ 3.0.4 и их штатные
-   зависимости.
-3. Поместите туда `copycat_roller-1.4.0.jar`.
-4. Запускайте игру и сервер на Java 21.
+1. Install NeoForge, Create, Copycats+, and their required dependencies.
+2. Place `copycat_roller-1.4.0.jar` in the `mods` directory on both the
+   client and server.
+3. Run Minecraft with Java 21.
 
-Мод не изменяет JAR-файлы Create или Copycats+.
+The addon does not modify the original Create or Copycats+ JAR files.
 
-## Поведение
+## Configuration
 
-Compat-ветка включается только когда одновременно выполнены два условия:
+The common configuration is generated at:
 
-- фильтр Roller содержит точный предмет одного из трёх поддерживаемых блоков
-  либо `create:zinc_ingot`;
-- выбран режим Create `STRAIGHT_FILL`.
+```text
+config/copycat_roller-common.toml
+```
 
-Для любого другого фильтра, `TUNNEL_PAVE` и `WIDE_FILL` управление остаётся
-у исходного кода Create.
-
-## Конфигурация
-
-После первого запуска создаётся `config/copycat_roller-common.toml`:
+Defaults:
 
 ```toml
 [paving]
@@ -55,130 +61,25 @@ fillDepthBlocks = 1
 slopeMaxVerticalError = 0.25
 ```
 
-- `roundingDirection = "DOWN"` — округление к предыдущей ступени 1/8:
-  `(0, 1/8] -> 0`, `(1/8, 2/8] -> 1`, …, `(7/8, 1] -> 7`.
-- `roundingDirection = "UP"` — прежнее заполнение без вертикального зазора:
-  `(0, 1/8] -> 1`, …, `(7/8, 1) -> 8`.
-- `surfaceOnly = true` — режим по умолчанию: ставится только одна верхняя
-  ячейка поверхности. Полные опорные блоки под частичным состоянием не
-  создаются. Ровный прямой профиль на целой границе блоков пропускается.
-- `fillDepthBlocks` — количество полных позиций, проверяемых вниз, включая
-  ближайший базовый блок. Допустимо `1..512`, значение по умолчанию `1`.
-  Настройка используется только при `surfaceOnly = false`.
-- `slopeMaxVerticalError` — максимальный допустимый зазор между краем
-  Slope Layer и профилем пути. Состояния, которые пересекают профиль или
-  отстают больше этого значения, пропускаются. По умолчанию `0.25`.
+- `roundingDirection`: selects downward or upward 1/8-step rounding.
+- `surfaceOnly`: places only the upper surface cell when enabled.
+- `fillDepthBlocks`: controls downward filling when `surfaceOnly=false`.
+- `slopeMaxVerticalError`: controls when an inaccurate Slope Layer is
+  skipped.
 
-При `surfaceOnly = false` возвращается прежнее заполнение вниз. Лимит Create
-`rollerFillDepth + 1` остаётся верхней защитной границей: эффективное число
-уровней равно меньшему из двух настроек.
+## Zinc Mode
 
-На железнодорожном составе аддон сохраняет дробный Y пути до квантизации
-Create. X/Z-покрытие берётся из штатного `PaveTask`, поэтому ширина, steering
-и выбор ребра не меняются. Для наклонных прямых высота интерполируется по
-`TrackEdge`; для Bezier-кривых повторяются LUT и raster traversal
-`TrackPaverV2`, но сохраняется исходный `double y`.
+With `create:zinc_ingot` in the filter, equal half-cell heights produce a
+standard Layer and unequal heights produce a Half Layer.
 
-Для поверхности `surfaceY` сначала вычисляются:
+One zinc ingot is worth eight standard Layers or sixteen Half Layers.
+Remainders are stored as real `copycat_half_layer` items in the contraption
+inventory. If the remainder cannot be stored, the placement is cancelled
+without changing the world or losing zinc.
 
-```text
-baseY   = floor(surfaceY)
-fraction = surfaceY - baseY
+## Building
 
-UP:   layers = clamp(ceil (fraction * 8 - 1e-7), 0, 8)
-DOWN: layers = clamp(floor(fraction * 8 - 1e-7), 0, 8)
-```
-
-Форма базового и верхнего блоков определяется предметом в фильтре:
-
-- обычный Layer: `facing=up`, `layers=N`;
-- Half Layer: `half=bottom`, продольная `axis=x|z`, независимые
-  `negative_layers` и `positive_layers`;
-- Slope Layer: `half=bottom`, `facing` направлен к более высокой стороне
-  пути, `layers=N`.
-
-При фильтре `create:zinc_ingot` форма выбирается автоматически. Сначала для
-обеих продольных половин ячейки вычисляются безопасные высоты Half Layer.
-Если `negative_layers == positive_layers`, две равные половины сворачиваются
-в один обычный `copycat_layer`; если высоты различаются, остаётся
-`copycat_half_layer`. Поэтому на ровной по ширине части полотна нет лишнего
-шва посередине, а на переходе высот сохраняется независимая форма половин.
-Slope Layer цинковый режим не создаёт.
-
-Для Half Layer высота вычисляется не в центрах половин, а по самой низкой
-точке профиля над каждой прямоугольной половиной. В расчёт входит и
-поперечный градиент. Поэтому на диагонали и кривой высокий край Half Layer
-не выступает за плоскость рельса. Если выбран `UP`, итог дополнительно
-ограничивается безопасной высотой: геометрическая защита важнее округления
-вверх.
-
-Штатные формы Slope Layer имеют уклон не с постоянным углом:
-`1/4, 1/2, 3/4, 1, 3/4, 1/2, 1/4, 0` для `layers=1..8`. Аддон сравнивает
-низкий и высокий край каждого кандидата с неокруглённой локальной плоскостью
-пути. Форма никогда не выбирается, если пересекает путь. Если оставшийся
-зазор больше `slopeMaxVerticalError`, ячейка намеренно остаётся пустой —
-это убирает «пилу» там, где восемью формами Copycats+ нельзя выразить
-достаточно плавный скос.
-
-В режиме `surfaceOnly` физическая верхняя поверхность равна
-`surfaceY + 1`. Аддон выбирает только самую высокую занятую ячейку и ставит
-в неё частичное состояние. Базовый полный блок и блоки ниже не создаются.
-Если поверхность ровного прямого пути точно совпадает с целой Y-границей,
-частичной ячейки нет и Roller ничего не расходует. При
-`surfaceOnly = false` действует прежняя схема: полный `baseY`, верхняя
-дробная добавка и заполнение вниз по `fillDepthBlocks`.
-
-Вне железнодорожного состава используется штатная позиция Roller и
-полное состояние выбранного типа.
-
-## Расход предметов
-
-Для трёх прямых Copycat-фильтров извлекается только точный выбранный предмет.
-Стоимость повторяет `SpecialBlockItemRequirement` Copycats+:
-
-| Фильтр/операция | Расход |
-| --- | ---: |
-| Layer или Slope Layer, новое `layers=N` | `N` |
-| Layer или Slope Layer, полный `layers=8` | `8` |
-| Half Layer | `negative_layers + positive_layers` |
-| Полный Half Layer `8 + 8` | `16` |
-| Наращивание | сумма только положительных разниц свойств |
-| Уже достигнутая или большая высота | `0` |
-
-Для автоматического цинкового фильтра используется точная стоимость рецептов
-Copycats+ 3.0.4:
-
-| Ресурс | Ценность |
-| --- | ---: |
-| `1 create:zinc_ingot` | `8 copycat_layer` или `16 copycat_half_layer` |
-| `1 copycat_layer` | `2` половинчатые единицы |
-| `1 copycat_half_layer` | `1` половинчатая единица |
-
-Цинк для расхода, как и обычный материал Roller, должен находиться в mounted
-storage контрапции; предмет в слоте фильтра не расходуется. Минимальной
-безостаточной единицей служит настоящий `copycat_half_layer`. Например,
-обычный `layers=3` стоит 6 половинчатых единиц: из одного слитка остаются
-10 предметов `copycat_half_layer`. Они сохраняются в mounted storage и
-первыми расходуются на следующие автоматические установки, в том числе
-попарно для обычного Layer.
-
-Преобразование выполняется до изменения мира на серверном треде. Если
-сдачу некуда положить, извлечённые предметы возвращаются и конкретная
-установка отменяется: мир, число слитков и накопленная сдача не меняются.
-Сдача от штатной ситуации никогда не выбрасывается в мир.
-
-До изменения мира выполняется точная симуляция извлечения. Если для одной
-установки не хватает полного количества, не изменяются ни мир, ни
-инвентарь. Реальное извлечение также проверяется; при неожиданном отказе
-установки состояние откатывается, а предметы возвращаются в mounted storage
-(или выбрасываются в точке операции, если хранилище больше не принимает их).
-
-Новый block entity остаётся со стандартным пустым материалом Copycats+.
-Half Layer проверяется как multistate block entity, включая пустоту
-материалов обеих половин. Существующий слой с пользовательским материалом
-не меняется.
-
-## Сборка и тесты
+From the project directory:
 
 ```powershell
 .\gradlew.bat test
@@ -186,19 +87,17 @@ Half Layer проверяется как multistate block entity, включая
 .\gradlew.bat build
 ```
 
-GameTest-сервер запускает 34 обязательных теста, включая три точных фильтра
-и автоматический цинковый фильтр,
-оба режима округления, значения конфигурации по умолчанию, Half Layer по
-обеим сторонам оси, защиту Half Layer на диагонали, верхнюю оболочку без
-полного основания, пропуск ровного пути, quality gate Slope Layer,
-направление склона, расход, атомарность, защиту пользовательских материалов,
-X/Z-покрытие прямых и кривых, выбор Layer/Half Layer по равенству высот,
-точную цинковую сдачу, откат без свободного места, область compat-ветки и
-server-side classloading.
+The built JAR is written to `build/libs`.
 
-Подробности:
+The verified 1.4.0 build passes 23 unit tests and 34 required NeoForge
+GameTests, including dedicated-server classloading.
 
-- [исследование API](docs/API_RESEARCH.md);
-- [Mixin targets и дескрипторы](docs/MIXIN_TARGETS.md);
-- [отчёт о проверках](docs/TEST_REPORT.md);
-- [известные ограничения](KNOWN_LIMITATIONS.md).
+## Technical Documentation
+
+- [API research](docs/API_RESEARCH.md)
+- [Mixin targets and descriptors](docs/MIXIN_TARGETS.md)
+- [Build and test report](docs/TEST_REPORT.md)
+- [Known limitations](KNOWN_LIMITATIONS.md)
+
+All Mixin injections use `require=1`, and the Mixin plugin applies them only
+when both Create and Copycats+ are present.
