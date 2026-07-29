@@ -6,11 +6,6 @@ layers from Copycats+.
 It preserves fractional track heights and can pave straight, diagonal, and
 curved railway sections in 1/8-block increments.
 
-For a player-focused overview with screenshots, see:
-
-- [Modrinth description — English](MODRINTH.md)
-- [Modrinth description — Russian](MODRINTH_RU.md)
-
 ## Supported Filters
 
 The compatibility branch accepts:
@@ -27,7 +22,7 @@ materials retain their original Create behavior.
 
 - Minecraft `1.21.1`
 - NeoForge `21.1.x`
-- Create `6.0.11`
+- Create `6`
 - Copycats+ `3.0.4`
 - Java `21`
 

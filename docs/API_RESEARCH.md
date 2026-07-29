@@ -5,14 +5,12 @@
 
 ## Зафиксированные исходники
 
-- Create 6.0.11: commit
-  `87b3c6a65fd00c023a07b37b0353144bc7e6a5bf`, Maven artifact
-  `create-1.21.1:6.0.11-295`.
+- Create 6 artifacts for Minecraft 1.21.1 from the official Create Maven.
 - Copycats+ 3.0.4 для Minecraft 1.21.1: tag `v3.0.4+mc1.21.1`,
   commit `9f808ac0b437817696c50f2e8b57f590b1196094`, CurseForge file
   `7251823`.
 
-## Create 6.0.11
+## Create 6
 
 Проверенные сигнатуры:
 
@@ -78,7 +76,7 @@ public CombinedInvWrapper getAllItems();
 Основной mounted inventory получается через
 `context.contraption.getStorage().getAllItems()`.
 
-Декомпиляция `tryFill` подтверждает, что Create 6.0.11 извлекает один
+Декомпиляция `tryFill` подтверждает, что Create 6 извлекает один
 предмет, совпавший с фильтром, и устанавливает возвращённый
 `getStateToPaveWith(...)` state. Отдельного runtime-банка либо механизма
 возврата остатка для преобразования блока в несколько частичных блоков в

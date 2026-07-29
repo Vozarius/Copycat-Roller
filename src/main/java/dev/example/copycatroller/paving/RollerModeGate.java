@@ -3,7 +3,7 @@ package dev.example.copycatroller.paving;
 import net.minecraft.nbt.CompoundTag;
 
 /**
- * Create 6.0.11 keeps RollerBlockEntity.RollingMode package-private. A mixin in
+ * Create 6 keeps RollerBlockEntity.RollingMode package-private. A mixin in
  * Create's package would create a forbidden JPMS split-package, so the ordinal
  * is isolated here and guarded against the runtime enum order by a server
  * GameTest.

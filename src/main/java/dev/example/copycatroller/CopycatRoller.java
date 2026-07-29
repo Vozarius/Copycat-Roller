@@ -14,6 +14,6 @@ public final class CopycatRoller {
 
     public CopycatRoller(IEventBus modBus, ModContainer container) {
         container.registerConfig(ModConfig.Type.COMMON, CopycatRollerConfig.SPEC);
-        LOGGER.info("Copycat Roller initialized for Create 6.0.11 and Copycats+ 3.0.4");
+        LOGGER.info("Copycat Roller initialized for Create 6 and Copycats+ 3.0.4");
     }
 }

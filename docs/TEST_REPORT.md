@@ -7,7 +7,7 @@
 - Gradle 8.14.3
 - Minecraft 1.21.1
 - NeoForge 21.1.219
-- Create 6.0.11
+- Create 6
 - Copycats+ 3.0.4
 
 ## Итоговые команды
@@ -30,15 +30,21 @@
 .\gradlew.bat clean build runGameTestServer --console=plain
 ```
 
-Результат: `BUILD SUCCESSFUL in 1m 10s`; все 23 unit-теста прошли, dedicated
-GameTest-сервер завершил `34/34` обязательных теста за `2.679 s`.
+Результат: `BUILD SUCCESSFUL in 31s`; все 23 unit-теста прошли, dedicated
+GameTest-сервер завершил `34/34` обязательных теста за `586.2 ms`.
+
+Дополнительно выполнены проверки на нижней совместимой с Copycats+ сборке
+Create 6 и на верхней доступной сборке Create 6. В обоих случаях проект
+собрался, dedicated server запустился и завершил `34/34` GameTests. Сам аддон
+объявляет диапазон всей ветки Create 6; фактическую нижнюю границу сборки
+модпака дополнительно ограничивают зависимости Copycats+.
 
 Артефакты:
 
-- `build/libs/copycat_roller-1.4.0.jar` — 72 478 байт;
-- `build/libs/copycat_roller-1.4.0-sources.jar` — 34 566 байт;
+- `build/libs/copycat_roller-1.4.0.jar` — 72 475 байт;
+- `build/libs/copycat_roller-1.4.0-sources.jar` — 34 557 байт;
 - SHA-256 основного JAR:
-  `208769D1A26EF20C5C9D67E2D3336A8CD1A0C72955FBA63C808382A154EC38BB`.
+  `E388EED61C3D7FA45DA4912F036FB1D4B92C2EC60F0A5DAABA8B4FF5D1E40AB1`.
 
 ## Unit-тесты
 
@@ -121,8 +127,8 @@ GameTest-сервер завершил `34/34` обязательных тест
 
 ## Диагностические итерации
 
-- Первоначальная зависимость от несуществующего classifier `slim` для Maven
-  build 295 Create была заменена на полный официальный artifact.
+- Первоначальная зависимость от отсутствующего classifier `slim` для Create
+  была заменена на полный официальный artifact.
 - Попытка поместить mixin в Java-пакет Create была отклонена JPMS как
   split-package; mixins перенесены в пакет аддона, ordinal режима
   централизован и защищён GameTest.
