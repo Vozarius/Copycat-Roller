@@ -24,14 +24,16 @@ Final combined run:
 .\gradlew.bat build runGameTestServer --console=plain
 ```
 
-Final clean verification of version 1.7.0:
+Final clean verification of version 1.0:
 
 ```powershell
-.\gradlew.bat clean build runGameTestServer --console=plain
+.\gradlew.bat clean build --console=plain
+.\gradlew.bat runGameTestServer --console=plain
 ```
 
-Result: `BUILD SUCCESSFUL in 1m`; all 23 unit tests passed, and the dedicated
-GameTest server completed all `49/49` required tests in `1.539 s`.
+Result: the clean build completed successfully in `12 s`; all 23 unit tests
+passed, and the dedicated GameTest server completed all `49/49` required tests
+in `704.8 ms`.
 
 Additional checks were performed with both the lowest Copycats+-compatible
 Create 6 build and the highest available Create 6 build. In both cases, the
@@ -48,10 +50,10 @@ It completed all `49/49` required tests in `1.243 s`.
 
 Artifacts:
 
-- `build/libs/copycat_roller-1.7.0.jar` — 97,000 bytes;
-- `build/libs/copycat_roller-1.7.0-sources.jar` — 42,340 bytes;
+- `build/libs/copycat_roller-1.0.jar` — 96,993 bytes;
+- `build/libs/copycat_roller-1.0-sources.jar` — 42,340 bytes;
 - SHA-256 of the main JAR:
-  `B77CA20203D02318FDC7DED3D52BB284E7E3C42DCE391A767E05458ADFCDEA67`.
+  `2BC63C709D8AD3149D258E9A1F42B4940C9127C624F9730B4DFFEC54EE63F7DB`.
 
 ## Unit Tests
 
