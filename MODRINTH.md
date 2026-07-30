@@ -15,7 +15,8 @@ in 1/8-block steps.
 - Precise Copycat paving along railway tracks
 - Layer, Half Layer, and Slope Layer support
 - Automatic Layer/Half Layer selection with a Zinc Ingot
-- Ordinary blocks fill existing Copycats and pave empty spaces at the same time
+- Blocks selected by Create or compatible Roller-filter mods fill Copycats
+- The same blocks continue normal Create paving in empty spaces
 - Safe item use with no hidden material balance
 
 ## Filters
@@ -30,11 +31,15 @@ Put one of these items in a Mechanical Roller's filter:
   - A smooth slope where a suitable state exists
 - **Zinc Ingot**
   - Automatically chooses Layer or Half Layer
-- **Any supported block**
-  - Applies its material to Copycats and continues normal Create paving
+- **Any supported block or compatible modded filter**
+  - Applies the block actually selected for each position to Copycats and
+    continues normal Create paving
 
 Addon features are active in **Fill** (`STRAIGHT_FILL`) mode. Tunnel and Wide
 Fill keep their normal Create behavior.
+
+Compatible filters need no dedicated integration: Copycat Roller follows the
+block selected by the normal Roller placement transaction.
 
 ## Item Use
 

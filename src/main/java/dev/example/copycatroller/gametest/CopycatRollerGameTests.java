@@ -14,9 +14,12 @@ import com.copycatsplus.copycats.foundation.copycat.ICopycatBlockEntity;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlockEntity;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.AllItems;
+import com.simibubi.create.content.contraptions.bearing.BearingContraption;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.RollerBlockEntity;
+import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour;
 import com.simibubi.create.content.contraptions.actors.roller.TrackPaverV2;
+import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import com.simibubi.create.content.trains.graph.TrackEdge;
 import com.simibubi.create.content.trains.graph.TrackGraph;
 import com.simibubi.create.content.trains.graph.TrackNode;
@@ -35,12 +38,14 @@ import dev.example.copycatroller.paving.CopycatMaterialFillingService.MaterialFi
 import dev.example.copycatroller.paving.CopycatPavingMaterial;
 import dev.example.copycatroller.paving.LayerMath;
 import dev.example.copycatroller.paving.PreciseTrackHeightSampler;
+import dev.example.copycatroller.paving.RollerMaterialPlacementCapture;
 import dev.example.copycatroller.paving.RollerModeGate;
 import dev.example.copycatroller.paving.SurfacePlacement;
 import dev.example.copycatroller.paving.TrackSurfaceSample;
 import net.createmod.catnip.data.Couple;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -52,7 +57,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Half;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import net.neoforged.neoforge.items.ItemStackHandler;
@@ -272,6 +279,211 @@ public final class CopycatRollerGameTests {
         check(helper, result == FillResult.FAIL, "underfunded multistate fill did not fail");
         assertEmptyMaterial(helper, position, CopycatPavingMaterial.HALF_LAYER);
         check(helper, count(materialInventory) == 1, "failed multistate fill consumed a block");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillCompletesPrepaidMultistateCost(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 2, 2),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 4)
+        );
+        ItemStackHandler mountedInventory = blockInventory(Blocks.STONE, 1);
+
+        FillResult result = CopycatMaterialFillingService.tryFillWithPrepaid(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            new ItemStack(Blocks.STONE),
+            mountedInventory
+        );
+
+        check(helper, result == FillResult.SUCCESS, "prepaid Half Layer fill failed");
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.NEGATIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        check(
+            helper,
+            count(mountedInventory) == 0,
+            "prepaid Half Layer did not consume exactly one additional block"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillRefundsPrepaidItemWhenUnderfunded(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 2, 2),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 4)
+        );
+        ItemStackHandler mountedInventory = new ItemStackHandler(1);
+
+        FillResult result = CopycatMaterialFillingService.tryFillWithPrepaid(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            new ItemStack(Blocks.STONE),
+            mountedInventory
+        );
+
+        check(helper, result == FillResult.FAIL, "underfunded prepaid fill did not fail");
+        assertEmptyMaterial(helper, position, CopycatPavingMaterial.HALF_LAYER);
+        check(
+            helper,
+            count(mountedInventory) == 1,
+            "underfunded prepaid fill did not return the selected block"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void randomizeFilterUsesItsSelectedBlockForCopycat(GameTestHelper helper) {
+        if (!ModList.get().isLoaded("createrandomizefilters")) {
+            helper.succeed();
+            return;
+        }
+
+        try {
+            BlockPos position = resetTarget(helper);
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.HALF_LAYER,
+                CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 2, 2),
+                inventory(CopycatPavingMaterial.HALF_LAYER, 4)
+            );
+
+            ItemStack randomFilter = randomizeFilterWith(
+                Blocks.GRAVEL.defaultBlockState()
+            );
+            CompoundTag rollerData = new CompoundTag();
+            rollerData.put(
+                "Filter",
+                randomFilter.save(helper.getLevel().registryAccess())
+            );
+
+            BearingContraption contraption = new BearingContraption();
+            contraption.getStorage().initialize();
+            ItemStackHandler mountedInventory = blockInventory(Blocks.GRAVEL, 3);
+            contraption.getStorage().attachExternal(mountedInventory);
+            MovementContext context = new MovementContext(
+                helper.getLevel(),
+                new StructureBlockInfo(
+                    BlockPos.ZERO,
+                    AllBlocks.MECHANICAL_ROLLER.getDefaultState(),
+                    rollerData
+                ),
+                contraption
+            );
+
+            boolean changed = RollerMaterialPlacementCapture.probe(
+                new RollerMovementBehaviour(),
+                context,
+                position,
+                Blocks.STONE.defaultBlockState(),
+                contraption.getStorage().getAllItems()
+            );
+
+            check(helper, changed, "Randomize Filter selection did not fill the Copycat");
+            assertPartMaterial(
+                helper,
+                position,
+                CopycatHalfLayerBlock.NEGATIVE_LAYERS.getName(),
+                Blocks.GRAVEL.defaultBlockState()
+            );
+            assertPartMaterial(
+                helper,
+                position,
+                CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+                Blocks.GRAVEL.defaultBlockState()
+            );
+            check(
+                helper,
+                count(mountedInventory) == 1,
+                "Randomize Filter Half Layer did not consume exactly two selected blocks"
+            );
+        } catch (ReflectiveOperationException exception) {
+            helper.fail("Could not configure Create Randomize Filters: " + exception);
+            return;
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void ordinaryFilterUsesRealRollerTransactionForCopycat(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 2, 2),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 4)
+        );
+
+        ItemStack filter = new ItemStack(Blocks.STONE);
+        CompoundTag rollerData = new CompoundTag();
+        rollerData.put(
+            "Filter",
+            filter.save(helper.getLevel().registryAccess())
+        );
+
+        BearingContraption contraption = new BearingContraption();
+        contraption.getStorage().initialize();
+        ItemStackHandler mountedInventory = blockInventory(Blocks.STONE, 3);
+        contraption.getStorage().attachExternal(mountedInventory);
+        MovementContext context = new MovementContext(
+            helper.getLevel(),
+            new StructureBlockInfo(
+                BlockPos.ZERO,
+                AllBlocks.MECHANICAL_ROLLER.getDefaultState(),
+                rollerData
+            ),
+            contraption
+        );
+
+        boolean changed = RollerMaterialPlacementCapture.probe(
+            new RollerMovementBehaviour(),
+            context,
+            position,
+            Blocks.STONE.defaultBlockState(),
+            contraption.getStorage().getAllItems()
+        );
+
+        check(helper, changed, "ordinary Roller transaction did not fill the Copycat");
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.NEGATIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        check(
+            helper,
+            count(mountedInventory) == 1,
+            "ordinary Roller transaction did not consume exactly two blocks"
+        );
         helper.succeed();
     }
 
@@ -1442,6 +1654,42 @@ public final class CopycatRollerGameTests {
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError("Could not invoke Roller material predicate", exception);
         }
+    }
+
+    private static ItemStack randomizeFilterWith(BlockState material)
+        throws ReflectiveOperationException {
+        ResourceLocation filterId = ResourceLocation.fromNamespaceAndPath(
+            "createrandomizefilters",
+            "randomize_filter"
+        );
+        ItemStack filter = new ItemStack(BuiltInRegistries.ITEM.get(filterId));
+        Class<?> listClass = Class.forName(
+            "com.createrandomizefilters.component.FilterBlockList"
+        );
+        Object list = listClass
+            .getConstructor(List.class, int.class)
+            .newInstance(
+                List.of(BuiltInRegistries.BLOCK.getKey(material.getBlock())),
+                0
+            );
+        DataComponentType<?> component =
+            BuiltInRegistries.DATA_COMPONENT_TYPE.get(
+                ResourceLocation.fromNamespaceAndPath(
+                    "createrandomizefilters",
+                    "filter_block_list"
+                )
+            );
+        setComponent(filter, component, list);
+        return filter;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void setComponent(
+        ItemStack stack,
+        DataComponentType<?> component,
+        Object value
+    ) {
+        stack.set((DataComponentType) component, value);
     }
 
     private static void placeProfileColumn(

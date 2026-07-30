@@ -89,6 +89,26 @@ public final class CopycatMaterialFillingService {
             return MaterialFillPlan.EMPTY;
         }
 
+        return planPassForAnyFilter(
+            level,
+            fallbackPosition,
+            trackProfile,
+            rollerLocalY
+        );
+    }
+
+    /**
+     * Builds only the geometric part of a material-fill pass. The selected
+     * material is deliberately resolved later by running Create's own
+     * {@code tryFill} transaction, allowing third-party Roller filters to
+     * choose a different item for every position.
+     */
+    public static MaterialFillPlan planPassForAnyFilter(
+        Level level,
+        BlockPos fallbackPosition,
+        @Nullable PaveTask trackProfile,
+        int rollerLocalY
+    ) {
         List<TrackSurfaceSample> samples = trackProfile == null
             ? List.of(new TrackSurfaceSample(
                 fallbackPosition.getX(),
@@ -96,7 +116,7 @@ public final class CopycatMaterialFillingService {
                 fallbackPosition.getY()
             ))
             : PreciseTrackHeightSampler.samples(trackProfile, rollerLocalY);
-        return planSamples(level, samples, filter);
+        return planSamplesForAnyFilter(level, samples);
     }
 
     /**
@@ -118,6 +138,17 @@ public final class CopycatMaterialFillingService {
         ItemStack filter
     ) {
         if (!isMaterialFilter(filter) || samples.isEmpty()) {
+            return MaterialFillPlan.EMPTY;
+        }
+
+        return planSamplesForAnyFilter(level, samples);
+    }
+
+    public static MaterialFillPlan planSamplesForAnyFilter(
+        Level level,
+        List<TrackSurfaceSample> samples
+    ) {
+        if (samples.isEmpty()) {
             return MaterialFillPlan.EMPTY;
         }
 
@@ -241,15 +272,39 @@ public final class CopycatMaterialFillingService {
         ItemStack filter,
         IItemHandler inventory
     ) {
+        return tryFillWithPrepaid(
+            level,
+            position,
+            filter,
+            ItemStack.EMPTY,
+            inventory
+        );
+    }
+
+    /**
+     * Assigns a material after the normal Roller transaction has already
+     * removed {@code prepaid} items. Any remaining multistate cost is
+     * extracted atomically. Every early exit returns the prepaid items.
+     */
+    public static FillResult tryFillWithPrepaid(
+        Level level,
+        BlockPos position,
+        ItemStack filter,
+        ItemStack prepaid,
+        IItemHandler inventory
+    ) {
         if (level.isClientSide || !level.isLoaded(position) || !isMaterialFilter(filter)) {
+            refund(level, position, inventory, prepaid);
             return FillResult.NOT_APPLICABLE;
         }
 
         BlockState copycatState = level.getBlockState(position);
         if (!(copycatState.getBlock() instanceof ICopycatBlock copycatBlock)) {
+            refund(level, position, inventory, prepaid);
             return FillResult.NOT_APPLICABLE;
         }
         if (!(level.getBlockEntity(position) instanceof ICopycatBlockEntity copycat)) {
+            refund(level, position, inventory, prepaid);
             logFailure("Copycat block at {} has no Copycats+ block entity", position);
             return FillResult.FAIL;
         }
@@ -257,6 +312,7 @@ public final class CopycatMaterialFillingService {
         boolean multistateBlock = copycatBlock instanceof IMultiStateCopycatBlock;
         boolean multistateEntity = copycat instanceof IMultiStateCopycatBlockEntity;
         if (multistateBlock != multistateEntity) {
+            refund(level, position, inventory, prepaid);
             logFailure("Copycat block and block entity disagree on multistate storage at {}", position);
             return FillResult.FAIL;
         }
@@ -269,6 +325,7 @@ public final class CopycatMaterialFillingService {
                 (IMultiStateCopycatBlock) copycatBlock,
                 (IMultiStateCopycatBlockEntity) copycat,
                 filter,
+                prepaid,
                 inventory
             );
         }
@@ -279,8 +336,62 @@ public final class CopycatMaterialFillingService {
             copycatBlock,
             copycat,
             filter,
+            prepaid,
             inventory
         );
+    }
+
+    static boolean canAcceptMaterial(
+        Level level,
+        BlockPos position,
+        ItemStack material
+    ) {
+        if (!level.isLoaded(position) || !isMaterialFilter(material)) {
+            return false;
+        }
+
+        BlockState copycatState = level.getBlockState(position);
+        if (!(copycatState.getBlock() instanceof ICopycatBlock copycatBlock)
+            || !(level.getBlockEntity(position) instanceof ICopycatBlockEntity copycat)) {
+            return false;
+        }
+
+        if (copycatBlock instanceof IMultiStateCopycatBlock multistateBlock
+            && copycat instanceof IMultiStateCopycatBlockEntity multistateCopycat) {
+            MaterialItemStorage storage = multistateCopycat.getMaterialItemStorage();
+            for (String property : multistateBlock.storageProperties()) {
+                if (!multistateBlock.partExists(copycatState, property)) {
+                    continue;
+                }
+                MaterialItem current = storage.getMaterialItem(property);
+                if (current == null
+                    || current.hasCustomMaterial()
+                    || !current.consumedItem().isEmpty()) {
+                    continue;
+                }
+                if (multistateBlock.getAcceptedBlockState(
+                    property,
+                    level,
+                    position,
+                    material,
+                    Direction.UP
+                ) != null) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return !(copycatBlock instanceof IMultiStateCopycatBlock)
+            && !(copycat instanceof IMultiStateCopycatBlockEntity)
+            && !copycat.hasCustomMaterial()
+            && copycat.getConsumedItem().isEmpty()
+            && copycatBlock.getAcceptedBlockState(
+                level,
+                position,
+                material,
+                Direction.UP
+            ) != null;
     }
 
     private static FillResult fillSingle(
@@ -290,9 +401,11 @@ public final class CopycatMaterialFillingService {
         ICopycatBlock copycatBlock,
         ICopycatBlockEntity copycat,
         ItemStack filter,
+        ItemStack prepaid,
         IItemHandler inventory
     ) {
         if (copycat.hasCustomMaterial() || !copycat.getConsumedItem().isEmpty()) {
+            refund(level, position, inventory, prepaid);
             return FillResult.PASS;
         }
 
@@ -303,14 +416,16 @@ public final class CopycatMaterialFillingService {
             Direction.UP
         );
         if (acceptedMaterial == null) {
+            refund(level, position, inventory, prepaid);
             return FillResult.PASS;
         }
 
-        Optional<ItemStack> payment = extractExact(
+        Optional<ItemStack> payment = acquirePayment(
             level,
             position,
             inventory,
             filter,
+            prepaid,
             1
         );
         if (payment.isEmpty()) {
@@ -362,6 +477,7 @@ public final class CopycatMaterialFillingService {
         IMultiStateCopycatBlock copycatBlock,
         IMultiStateCopycatBlockEntity copycat,
         ItemStack filter,
+        ItemStack prepaid,
         IItemHandler inventory
     ) {
         MaterialItemStorage storage = copycat.getMaterialItemStorage();
@@ -373,6 +489,7 @@ public final class CopycatMaterialFillingService {
             }
             MaterialItem current = storage.getMaterialItem(property);
             if (current == null) {
+                refund(level, position, inventory, prepaid);
                 logFailure("Copycat material property {} is missing at {}", property, position);
                 return FillResult.FAIL;
             }
@@ -397,14 +514,16 @@ public final class CopycatMaterialFillingService {
         }
 
         if (assignments.isEmpty()) {
+            refund(level, position, inventory, prepaid);
             return FillResult.PASS;
         }
 
-        Optional<ItemStack> payment = extractExact(
+        Optional<ItemStack> payment = acquirePayment(
             level,
             position,
             inventory,
             filter,
+            prepaid,
             assignments.size()
         );
         if (payment.isEmpty()) {
@@ -491,35 +610,59 @@ public final class CopycatMaterialFillingService {
             && ItemStack.isSameItemSameComponents(stored, filter);
     }
 
-    private static Optional<ItemStack> extractExact(
+    private static Optional<ItemStack> acquirePayment(
         Level level,
         BlockPos position,
         IItemHandler inventory,
         ItemStack filter,
+        ItemStack prepaid,
         int count
     ) {
+        if (!prepaid.isEmpty()
+            && !ItemStack.isSameItemSameComponents(prepaid, filter)) {
+            refund(level, position, inventory, prepaid);
+            logFailure("Roller prepaid a different material item at {}", position);
+            return Optional.empty();
+        }
+
+        int prepaidCount = prepaid.getCount();
+        int remaining = Math.max(0, count - prepaidCount);
+        if (remaining == 0) {
+            if (prepaidCount > count) {
+                refund(
+                    level,
+                    position,
+                    inventory,
+                    prepaid.copyWithCount(prepaidCount - count)
+                );
+            }
+            return Optional.of(filter.copyWithCount(count));
+        }
+
         ItemStack simulated = ItemHelper.extract(
             inventory,
             stack -> ItemStack.isSameItemSameComponents(stack, filter),
-            count,
+            remaining,
             true
         );
-        if (simulated.getCount() != count) {
+        if (simulated.getCount() != remaining) {
+            refund(level, position, inventory, prepaid);
             return Optional.empty();
         }
 
         ItemStack extracted = ItemHelper.extract(
             inventory,
             stack -> ItemStack.isSameItemSameComponents(stack, filter),
-            count,
+            remaining,
             false
         );
-        if (extracted.getCount() != count) {
+        if (extracted.getCount() != remaining) {
             refund(level, position, inventory, extracted);
+            refund(level, position, inventory, prepaid);
             logFailure("Mounted storage changed during material extraction at {}", position);
             return Optional.empty();
         }
-        return Optional.of(extracted);
+        return Optional.of(filter.copyWithCount(count));
     }
 
     private static SingleSnapshot snapshot(MaterialItem materialItem) {
@@ -589,6 +732,15 @@ public final class CopycatMaterialFillingService {
             remainder.getCount(),
             position
         );
+    }
+
+    static void refundObservedExtraction(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        ItemStack extracted
+    ) {
+        refund(level, position, inventory, extracted);
     }
 
     private static void logFailure(String message, Object... arguments) {

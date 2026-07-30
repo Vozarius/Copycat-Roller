@@ -5,15 +5,16 @@ import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBeha
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import dev.example.copycatroller.paving.CopycatLayerPavingService;
 import dev.example.copycatroller.paving.CopycatMaterialFillingService;
-import dev.example.copycatroller.paving.CopycatMaterialFillingService.FillPassResult;
 import dev.example.copycatroller.paving.CopycatMaterialFillingService.MaterialFillPlan;
 import dev.example.copycatroller.paving.CopycatPavingMaterial;
+import dev.example.copycatroller.paving.RollerMaterialPlacementCapture;
 import dev.example.copycatroller.paving.RollerModeGate;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
@@ -24,6 +25,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(RollerMovementBehaviour.class)
 public abstract class RollerMovementBehaviourMixin {
@@ -34,6 +36,9 @@ public abstract class RollerMovementBehaviourMixin {
     @Shadow
     @Nullable
     protected abstract PaveTask createHeightProfileForTracks(MovementContext context);
+
+    @Shadow
+    protected abstract BlockState getStateToPaveWith(MovementContext context);
 
     @Inject(
         method = "triggerPaver(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;"
@@ -85,34 +90,78 @@ public abstract class RollerMovementBehaviourMixin {
             return;
         }
 
-        if (!CopycatMaterialFillingService.isMaterialFilter(filter)
-            || context.contraption == null) {
+        if (filter.isEmpty() || context.contraption == null) {
             return;
         }
 
         PaveTask trackProfile = createHeightProfileForTracks(context);
-        MaterialFillPlan plan = CopycatMaterialFillingService.planPass(
-            context.world,
-            position,
-            trackProfile,
-            context.localPos.getY(),
-            filter
-        );
+        MaterialFillPlan plan =
+            CopycatMaterialFillingService.planPassForAnyFilter(
+                context.world,
+                position,
+                trackProfile,
+                context.localPos.getY()
+            );
         if (plan.isEmpty()) {
             return;
         }
 
-        FillPassResult result = CopycatMaterialFillingService.fillPlan(
-            context.world,
-            plan,
-            filter,
-            context.contraption.getStorage().getAllItems()
-        );
+        boolean changed = false;
+        if (!context.world.isClientSide) {
+            BlockState provisionalState = getStateToPaveWith(context);
+            for (CopycatMaterialFillingService.SurfaceTarget target
+                : plan.targets()) {
+                changed |= RollerMaterialPlacementCapture.probe(
+                    this,
+                    context,
+                    target.copycatPosition(),
+                    provisionalState,
+                    context.contraption.getStorage().getAllItems()
+                );
+            }
+        }
         copycatRoller$materialPass.set(new MaterialPassState(
             context,
             plan,
-            result.changed()
+            changed
         ));
+    }
+
+    /**
+     * A protected surface Copycat has already gone through its own real
+     * Roller transaction at triggerPaver HEAD. The later vanilla pass must
+     * treat that cell as complete without asking a third-party filter to
+     * resolve the same position again.
+     */
+    @Inject(
+        method = "tryFill(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;"
+            + "Lnet/minecraft/core/BlockPos;"
+            + "Lnet/minecraft/world/level/block/state/BlockState;)"
+            + "Lcom/simibubi/create/content/contraptions/actors/roller/"
+            + "RollerMovementBehaviour$PaveResult;",
+        at = @At("HEAD"),
+        cancellable = true,
+        require = 1
+    )
+    private void copycatRoller$protectResolvedCopycat(
+        MovementContext context,
+        BlockPos targetPosition,
+        BlockState toPlace,
+        CallbackInfoReturnable<Object> callback
+    ) {
+        if (RollerMaterialPlacementCapture.shouldExposeReplaceable(
+            context,
+            targetPosition
+        )) {
+            return;
+        }
+
+        MaterialPassState pass = copycatRoller$materialPass.get();
+        if (pass != null
+            && pass.context() == context
+            && pass.plan().protects(targetPosition)) {
+            callback.setReturnValue(RollerMaterialPlacementCapture.passResult());
+        }
     }
 
     /**
@@ -143,10 +192,10 @@ public abstract class RollerMovementBehaviourMixin {
     }
 
     /**
-     * A partial Copycat normally occupies Create's optional slab cell. Make
-     * that one cell look like the requested block to Create's unchanged
-     * tryFill implementation, which returns PASS without extraction or world
-     * mutation.
+     * During the position-specific probe only, make the Copycat look
+     * replaceable so Create and other Roller Mixins reach their normal
+     * extraction and placement hooks. The actual placement is intercepted at
+     * Level.setBlockAndUpdate.
      */
     @Redirect(
         method = "tryFill(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;"
@@ -169,13 +218,40 @@ public abstract class RollerMovementBehaviourMixin {
         BlockPos targetPosition,
         BlockState toPlace
     ) {
-        MaterialPassState pass = copycatRoller$materialPass.get();
-        if (pass != null
-            && pass.context() == context
-            && pass.plan().protects(targetPosition)) {
-            return toPlace;
+        if (RollerMaterialPlacementCapture.shouldExposeReplaceable(
+            context,
+            targetPosition
+        )) {
+            return Blocks.AIR.defaultBlockState();
         }
         return level.getBlockState(queriedPosition);
+    }
+
+    @Inject(
+        method = "tryFill(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;"
+            + "Lnet/minecraft/core/BlockPos;"
+            + "Lnet/minecraft/world/level/block/state/BlockState;)"
+            + "Lcom/simibubi/create/content/contraptions/actors/roller/"
+            + "RollerMovementBehaviour$PaveResult;",
+        at = @At("RETURN"),
+        cancellable = true,
+        require = 1
+    )
+    private void copycatRoller$reportCapturedPlacement(
+        MovementContext context,
+        BlockPos targetPosition,
+        BlockState toPlace,
+        CallbackInfoReturnable<Object> callback
+    ) {
+        Object original = callback.getReturnValue();
+        Object adjusted = RollerMaterialPlacementCapture.adjustedTryFillResult(
+            context,
+            targetPosition,
+            original
+        );
+        if (adjusted != original) {
+            callback.setReturnValue(adjusted);
+        }
     }
 
     @Inject(

@@ -32,28 +32,36 @@ Final clean verification of version 1.0:
 ```
 
 Result: the clean build completed successfully in `12 s`; all 23 unit tests
-passed, and the dedicated GameTest server completed all `49/49` required tests
-in `704.8 ms`.
+passed. The dedicated GameTest server without optional filter mods completed
+all `53/53` required tests in `1.143 s`.
 
-Additional checks were performed with both the lowest Copycats+-compatible
-Create 6 build and the highest available Create 6 build. In both cases, the
-project built successfully, the dedicated server started, and all `49/49`
-GameTests passed. The addon declares the complete Create 6 branch as its
-range; Copycats+ dependencies impose an additional effective lower bound on
-the assembled modpack. The Create 6.0.8 verification used:
+The same dedicated suite was then run with the user-provided
+`createrandomizefilters-1.0.7.jar` in the GameTest runtime:
 
 ```powershell
-.\gradlew.bat '-Pcreate_version=6.0.8-169' runGameTestServer --console=plain
+.\gradlew.bat runGameTestServer --console=plain
 ```
 
-It completed all `49/49` required tests in `1.243 s`.
+Both Roller mixin sets applied successfully, and all `53/53` tests passed in
+`1.390 s`. The conditional integration test confirmed that Randomize Filters
+selected gravel despite a different provisional state, assigned gravel to
+both existing Half Layer parts, and consumed exactly two gravel blocks. The
+optional JAR was removed from the runtime after the test and is not packaged
+or declared as a dependency.
+
+Earlier compatibility checks were performed with both the lowest
+Copycats+-compatible Create 6 build and the highest available Create 6 build.
+In both cases, the project built successfully, the dedicated server started,
+and all `49/49` tests present at that time passed. The addon declares the
+complete Create 6 branch as its range; Copycats+ dependencies impose an
+additional effective lower bound on the assembled modpack.
 
 Artifacts:
 
-- `build/libs/copycat_roller-1.0.jar` — 96,993 bytes;
-- `build/libs/copycat_roller-1.0-sources.jar` — 42,340 bytes;
+- `build/libs/copycat_roller-1.0.jar` — 113,471 bytes;
+- `build/libs/copycat_roller-1.0-sources.jar` — 48,478 bytes;
 - SHA-256 of the main JAR:
-  `2BC63C709D8AD3149D258E9A1F42B4940C9127C624F9730B4DFFEC54EE63F7DB`.
+  `B7E99A96273BA6211954334460201E5B131BE75469C3B44EF62B27F88770DC9D`.
 
 ## Unit Tests
 
@@ -90,7 +98,7 @@ depth, and the standard `rollerFillDepth + 1` limit.
 
 ## NeoForge GameTests
 
-The suite contains 49 required tests:
+The suite contains 53 required tests:
 
 1. the exact Layer, Half Layer, Slope Layer, and `create:zinc_ingot` items are
    accepted by the Roller filter, and the exact zinc registry ID is confirmed;
@@ -158,7 +166,15 @@ The suite contains 49 required tests:
 48. a full Copycat base is protected and its ordinary full-block target is
     redirected exactly one block downward;
 49. a partial upper Copycat is protected while Create's base target remains
-    unchanged.
+    unchanged;
+50. a multistate Copycat treats the block already extracted by Create as
+    prepaid and consumes only the remaining exact per-part cost;
+51. an underfunded prepaid multistate operation returns the already extracted
+    block and leaves every Copycat part unchanged;
+52. an ordinary block filter passes through Create's real `tryFill`
+    transaction and pays the exact multistate cost without any optional mod;
+53. when Create: Randomize Filters 1.0.7 is present, its actual per-position
+    selection is captured and applied without a compile-time dependency.
 
 ## Diagnostic Iterations
 
@@ -188,15 +204,22 @@ The suite contains 49 required tests:
   free the slot.
 - The first material-filling branch intercepted each `tryFill(...)` target.
   Real track testing showed that this could miss a Copycat in an adjacent
-  vertical cell and pass the wrong targets back to Create. Material selection
-  was therefore moved to a precomputed `triggerPaver(...)` plan. The current
-  implementation fills the selected Copycats first, protects only their exact
-  cells, redirects a full Copycat base attempt to its support below, and lets
-  all remaining calls run through Create's unchanged `tryFill`. Per-part
-  multistate snapshots and exact extraction remain atomic.
+  vertical cell and pass the wrong targets back to Create. Geometry selection
+  was therefore moved to a precomputed `triggerPaver(...)` plan.
+- The next implementation resolved the literal filter item at
+  `triggerPaver(...)` HEAD. Inspection of Randomize Filters 1.0.7 showed that
+  its actual per-position block exists only after its `ItemHelper.extract`
+  redirect runs inside `tryFill`. The addon now probes that real transaction,
+  snapshots mounted inventory, and intercepts only the final
+  `Level.setBlockAndUpdate`.
+- The first probe used `Class.getDeclaredMethod` to access protected
+  `tryFill`. Broad reflection caused a dedicated server to resolve a
+  client-only `MultiBufferSource` type from an unrelated method. It was
+  replaced with a lazy `MethodHandle` lookup using the exact `tryFill`
+  descriptor. Both dedicated test configurations now load cleanly.
 
 The server log still contains warnings from the Copycats+, Flywheel, and
 Ponder mixin configurations: compatibility level, repeated `@Unique`
 annotations, and a missing Ponder development refmap. These warnings also
-occur without the addon, do not involve any of Copycat Roller's three mixin
+occur without the addon, do not involve any of Copycat Roller's four mixin
 classes, and did not prevent the injections or tests from succeeding.

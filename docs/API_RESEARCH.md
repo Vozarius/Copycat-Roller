@@ -87,23 +87,48 @@ method, but a non-Copycat target then fell back to ordinary Create paving and
 could place unwanted full blocks. It also missed a Copycat in the adjacent
 vertical cell selected by the fractional surface planner.
 
-The current implementation resolves an ordinary block filter at the head of
-`triggerPaver`. It uses Create's `PaveTask` for exact X/Z coverage and searches
-a narrow Y band for the closest Copycat surface before Create starts the pass.
-The matching Copycats are material-filled immediately, but the original
-`triggerPaver` continues for ordinary paving.
+The current implementation deliberately does not resolve an ordinary or
+third-party filter from its visible `ItemStack`. At the head of
+`triggerPaver`, it uses Create's `PaveTask` for exact X/Z coverage and searches
+a narrow Y band for the closest Copycat surface. It then invokes Create's real
+`tryFill` transaction for each selected Copycat cell.
 
-Two narrowly scoped argument/read intercepts keep both operations compatible:
+The protected Copycat is exposed as replaceable only for that transaction.
+Create and third-party Mixins can therefore choose a position-specific block
+and extract it from mounted storage exactly as they normally would. Immediately
+before `Level.setBlockAndUpdate`, the addon compares the mounted inventory with
+a component-sensitive snapshot, identifies the actual extracted `BlockItem`,
+cancels the world replacement, and assigns that material to the Copycat.
 
-- Create's optional upper-cell attempt treats the already selected Copycat
-  cell as `PASS`, without extraction or replacement;
+For a multistate Copycat, the first extracted item is treated as prepaid.
+The addon simulates and extracts the remaining exact per-part cost before
+changing its block entity. If the full cost cannot be paid, all observed
+extractions are returned and the Copycat remains unchanged. The original
+`triggerPaver` then continues for ordinary paving.
+
+Three narrowly scoped intercepts keep both operations compatible:
+
+- the later ordinary `tryFill` attempt treats an already processed Copycat
+  cell as `PASS`, without resolving or extracting the filter twice;
 - if a full Copycat occupies Create's base target, that one base argument is
   changed to `copycatPos.below()`, allowing the original `tryFill` transaction
-  to create a support block.
+  to create a support block;
+- `Level.setBlockAndUpdate` is intercepted only while the thread-local Roller
+  probe targets the same level and position. All other world writes are
+  untouched.
 
 All other `tryFill` calls retain Create's original loaded-chunk, leaves,
 replaceable-block, portal, mounted-inventory, state-placement, fill-depth, and
 result handling.
+
+Create: Randomize Filters 1.0.7 was inspected as a real interoperability case.
+Its Roller Mixin returns a provisional state from `getStateToPaveWith`, chooses
+the actual position-specific block while redirecting `ItemHelper.extract`
+inside `tryFill`, and substitutes that selected state at
+`Level.setBlockAndUpdate`. Capturing after extraction and before that final
+write is therefore necessary; inspecting the custom filter or provisional
+state alone would select the wrong material. Copycat Roller has no compile-time
+or runtime dependency on Randomize Filters.
 
 `RollingMode` is package-private and ordered as `TUNNEL_PAVE`,
 `STRAIGHT_FILL`, `WIDE_FILL`. Placing a mixin class in Create's package causes

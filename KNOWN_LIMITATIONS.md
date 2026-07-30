@@ -54,17 +54,21 @@
     uses neither a hidden balance nor world drops for normal change.
 
 11. GameTests integrate the real registry, block entities, mixins,
-    `TrackPaverV2`, and dedicated server. Consumption and placement operations
-    invoke the service directly so that the tests do not depend on the timing
-    of a fully assembled moving train. The straight, diagonal, and Bezier X/Z
-    profiles are tested separately against Create's real `PaveTask`.
+    `TrackPaverV2`, and dedicated server. Most consumption and placement
+    operations invoke the service directly so that the suite does not depend
+    on the timing of a fully assembled moving train. A separate conditional
+    integration test runs the actual Create `tryFill` transaction with Create:
+    Randomize Filters 1.0.7. The straight, diagonal, and Bezier X/Z profiles
+    are tested separately against Create's real `PaveTask`.
 
 12. Automatic material filling is active only in `STRAIGHT_FILL`. It uses
     Create's exact X/Z track profile but searches up to one block below the
-    expected surface before selecting the closest Copycat. The selected
-    Copycat cell is protected, while every column without a selected Copycat
-    continues through Create's original paving code. A material rejected by
-    Copycats+ is skipped without consuming it.
+    expected surface before selecting the closest Copycat. The selected cell
+    is passed through Create's real Roller placement transaction to discover
+    the block chosen for that position, then protected from the later ordinary
+    pass. Every column without a selected Copycat continues through Create's
+    original paving code. A material rejected by Copycats+ is skipped without
+    net consumption.
 
 13. Material orientation is resolved through
     `ICopycatBlock.getAcceptedBlockState(...)` as if the top face had been
@@ -78,3 +82,11 @@
     `rollerFillDepth` remain controlled by Create. Consequently, as with
     Create's normal Roller, a pass can stop at the first depth where any block
     is successfully placed.
+
+15. Third-party filter compatibility is protocol-based rather than tied to a
+    list of mods. A compatible filter must resolve its material synchronously
+    during Create's normal `tryFill` call, consume the selected `BlockItem`
+    from the mounted `IItemHandler`, and reach `Level.setBlockAndUpdate` for
+    the target position. A mod that bypasses this complete transaction, writes
+    blocks later or asynchronously, or represents material without a
+    `BlockItem` cannot be inferred safely and needs a dedicated integration.
