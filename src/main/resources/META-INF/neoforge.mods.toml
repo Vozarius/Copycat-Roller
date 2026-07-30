@@ -8,7 +8,7 @@ version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
 description = '''
-Adds precise Copycats+ Layer, Half Layer, and Slope Layer paving to Create Mechanical Rollers.
+Adds precise Copycats+ layer paving and automatic Copycat material filling to Create Mechanical Rollers.
 '''
 
 [[mixins]]

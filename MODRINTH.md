@@ -17,9 +17,38 @@ The following items can be placed in the Mechanical Roller's filter slot:
 - Copycat Slope Layer 
 - Zinc Ingot
 
-Compatibility is active only when the Roller is in **Fill**
-(`STRAIGHT_FILL`) mode. `TUNNEL_PAVE`, `WIDE_FILL`, and all other filter
-materials retain their original Create behavior.
+Thin-layer paving is active only when the Roller is in **Fill**
+(`STRAIGHT_FILL`) mode. `TUNNEL_PAVE` and `WIDE_FILL` retain their original
+Create behavior. Ordinary block filters have the combined behavior described
+below.
+
+## Filling Existing Copycats
+
+Place an ordinary block in the Roller's filter to apply it as the material of
+existing Copycats+ blocks beneath the Roller while also retaining Create's
+ordinary paving. The Copycat shape is preserved: the Roller changes only its
+displayed material.
+
+For every X/Z column, the addon searches a narrow vertical band and selects
+the closest Copycat surface below the precise track profile. The selected
+Copycat cell is protected from replacement, while empty columns are processed
+by Create exactly as usual. If a full Copycat occupies Create's base target,
+the ordinary full-block attempt is moved directly below it. A partial upper
+Copycat leaves the base cell available for normal paving.
+
+The selected block must be accepted by Copycats+ and available in the
+contraption's mounted storage. The item in the filter slot is not consumed.
+
+- A regular Copycat consumes one material block.
+- A multistate Copycat consumes one block for each existing empty part.
+- A Copycat Half Layer with both halves present consumes two blocks; a
+  one-sided Half Layer consumes one.
+- Existing player-assigned materials are never overwritten.
+- If there are not enough blocks for the complete Copycat, neither the
+  inventory nor the Copycat is changed.
+
+This feature is active only in **Fill** (`STRAIGHT_FILL`) mode and uses
+Create's normal Roller target positions, widths, and fill depth.
 
 ## Automatic Zinc Mode
 
@@ -139,3 +168,6 @@ are `1..512`. The result is also limited by Create's server-side
 Sets the maximum allowed vertical gap between a Slope Layer edge and the
 track profile. A lower value creates a more precise but potentially sparser
 surface.
+
+Ordinary block filters always combine Copycat material assignment with
+Create's normal paving; this behavior has no separate mode switch.

@@ -58,3 +58,23 @@
     invoke the service directly so that the tests do not depend on the timing
     of a fully assembled moving train. The straight, diagonal, and Bezier X/Z
     profiles are tested separately against Create's real `PaveTask`.
+
+12. Automatic material filling is active only in `STRAIGHT_FILL`. It uses
+    Create's exact X/Z track profile but searches up to one block below the
+    expected surface before selecting the closest Copycat. The selected
+    Copycat cell is protected, while every column without a selected Copycat
+    continues through Create's original paving code. A material rejected by
+    Copycats+ is skipped without consuming it.
+
+13. Material orientation is resolved through
+    `ICopycatBlock.getAcceptedBlockState(...)` as if the top face had been
+    targeted. A multistate Copycat consumes one material block for each
+    existing empty part; absent parts and parts with a player-assigned
+    material are not changed.
+
+14. If a full selected Copycat occupies Create's base target, that target is
+    redirected exactly one block downward. Further downward filling, occupied
+    block handling, leaves, portals, inventory extraction, and
+    `rollerFillDepth` remain controlled by Create. Consequently, as with
+    Create's normal Roller, a pass can stop at the first depth where any block
+    is successfully placed.

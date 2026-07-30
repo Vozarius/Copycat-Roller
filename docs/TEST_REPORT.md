@@ -24,28 +24,34 @@ Final combined run:
 .\gradlew.bat build runGameTestServer --console=plain
 ```
 
-Final clean verification of version 1.4.0:
+Final clean verification of version 1.7.0:
 
 ```powershell
 .\gradlew.bat clean build runGameTestServer --console=plain
 ```
 
-Result: `BUILD SUCCESSFUL in 31s`; all 23 unit tests passed, and the dedicated
-GameTest server completed all `34/34` required tests in `586.2 ms`.
+Result: `BUILD SUCCESSFUL in 1m`; all 23 unit tests passed, and the dedicated
+GameTest server completed all `49/49` required tests in `1.539 s`.
 
 Additional checks were performed with both the lowest Copycats+-compatible
 Create 6 build and the highest available Create 6 build. In both cases, the
-project built successfully, the dedicated server started, and all `34/34`
+project built successfully, the dedicated server started, and all `49/49`
 GameTests passed. The addon declares the complete Create 6 branch as its
 range; Copycats+ dependencies impose an additional effective lower bound on
-the assembled modpack.
+the assembled modpack. The Create 6.0.8 verification used:
+
+```powershell
+.\gradlew.bat '-Pcreate_version=6.0.8-169' runGameTestServer --console=plain
+```
+
+It completed all `49/49` required tests in `1.243 s`.
 
 Artifacts:
 
-- `build/libs/copycat_roller-1.4.0.jar` — 72,475 bytes;
-- `build/libs/copycat_roller-1.4.0-sources.jar` — 34,557 bytes;
+- `build/libs/copycat_roller-1.7.0.jar` — 97,000 bytes;
+- `build/libs/copycat_roller-1.7.0-sources.jar` — 42,340 bytes;
 - SHA-256 of the main JAR:
-  `E388EED61C3D7FA45DA4912F036FB1D4B92C2EC60F0A5DAABA8B4FF5D1E40AB1`.
+  `B77CA20203D02318FDC7DED3D52BB284E7E3C42DCE391A767E05458ADFCDEA67`.
 
 ## Unit Tests
 
@@ -82,7 +88,7 @@ depth, and the standard `rollerFillDepth + 1` limit.
 
 ## NeoForge GameTests
 
-The suite contains 34 required tests:
+The suite contains 49 required tests:
 
 1. the exact Layer, Half Layer, Slope Layer, and `create:zinc_ingot` items are
    accepted by the Roller filter, and the exact zinc registry ID is confirmed;
@@ -126,7 +132,31 @@ The suite contains 34 required tests:
 33. one ingot produces exactly either a full Layer with `layers=8` or a full
     Half Layer with `8 + 8`, with no change;
 34. insufficient space for change atomically cancels the operation without
-    changing the world or inventory.
+    changing the world or inventory;
+35. an ordinary block filter assigns its material to an empty single-state
+    Copycat and consumes exactly one matching block;
+36. an existing player-assigned material is preserved without further
+    consumption;
+37. a Half Layer with two existing parts receives material on both sides and
+    consumes two blocks;
+38. an absent Half Layer side remains empty and consumes nothing;
+39. insufficient material for every existing multistate part leaves both the
+    Copycat and inventory unchanged;
+40. a material rejected by Copycats+ is skipped without consumption;
+41. a different inventory block cannot fund the selected filter material;
+42. material filling also supports another Copycats+ shape without changing
+    its block state;
+43. a fractional track surface finds the Copycat in the adjacent vertical cell;
+44. the material-assignment service leaves empty neighboring columns for
+    Create instead of mutating them itself;
+45. stacked Copycats are resolved to the surface closest to the track;
+46. a sloped Half Layer is found and both existing parts are filled;
+47. a decorative Copycat more than one block below the expected surface is
+    ignored;
+48. a full Copycat base is protected and its ordinary full-block target is
+    redirected exactly one block downward;
+49. a partial upper Copycat is protected while Create's base target remains
+    unchanged.
 
 ## Diagnostic Iterations
 
@@ -154,6 +184,14 @@ The suite contains 34 required tests:
   rollback on failure. Dedicated GameTests confirm both the successful
   single-slot case and the atomic failure when a stack of two ingots does not
   free the slot.
+- The first material-filling branch intercepted each `tryFill(...)` target.
+  Real track testing showed that this could miss a Copycat in an adjacent
+  vertical cell and pass the wrong targets back to Create. Material selection
+  was therefore moved to a precomputed `triggerPaver(...)` plan. The current
+  implementation fills the selected Copycats first, protects only their exact
+  cells, redirects a full Copycat base attempt to its support below, and lets
+  all remaining calls run through Create's unchanged `tryFill`. Per-part
+  multistate snapshots and exact extraction remain atomic.
 
 The server log still contains warnings from the Copycats+, Flywheel, and
 Ponder mixin configurations: compatibility level, repeated `@Unique`

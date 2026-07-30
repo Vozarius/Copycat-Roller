@@ -82,6 +82,29 @@ converting one block into multiple partial blocks. Zinc compatibility
 therefore performs its own atomic conversion directly in the mounted
 inventory.
 
+The first material-filling implementation injected into this same `tryFill`
+method, but a non-Copycat target then fell back to ordinary Create paving and
+could place unwanted full blocks. It also missed a Copycat in the adjacent
+vertical cell selected by the fractional surface planner.
+
+The current implementation resolves an ordinary block filter at the head of
+`triggerPaver`. It uses Create's `PaveTask` for exact X/Z coverage and searches
+a narrow Y band for the closest Copycat surface before Create starts the pass.
+The matching Copycats are material-filled immediately, but the original
+`triggerPaver` continues for ordinary paving.
+
+Two narrowly scoped argument/read intercepts keep both operations compatible:
+
+- Create's optional upper-cell attempt treats the already selected Copycat
+  cell as `PASS`, without extraction or replacement;
+- if a full Copycat occupies Create's base target, that one base argument is
+  changed to `copycatPos.below()`, allowing the original `tryFill` transaction
+  to create a support block.
+
+All other `tryFill` calls retain Create's original loaded-chunk, leaves,
+replaceable-block, portal, mounted-inventory, state-placement, fill-depth, and
+result handling.
+
 `RollingMode` is package-private and ordered as `TUNNEL_PAVE`,
 `STRAIGHT_FILL`, `WIDE_FILL`. Placing a mixin class in Create's package causes
 a JPMS split-package error, so ordinal `1` is isolated in `RollerModeGate`. A
@@ -163,7 +186,39 @@ public class MultiStateCopycatBlockEntity
 
 default void ICopycatBlockEntity.init();
 default boolean ICopycatBlockEntity.hasCustomMaterial();
+default void ICopycatBlockEntity.setMaterial(BlockState material);
+default void ICopycatBlockEntity.setConsumedItem(ItemStack stack);
 ItemStack ICopycatBlockEntity.getConsumedItem();
+
+default BlockState ICopycatBlock.getAcceptedBlockState(
+    Level level,
+    BlockPos pos,
+    ItemStack stack,
+    Direction face
+);
+
+String IMultiStateCopycatBlock.defaultProperty();
+Set<String> IMultiStateCopycatBlock.storageProperties();
+boolean IMultiStateCopycatBlock.partExists(
+    BlockState state,
+    String property
+);
+BlockState IMultiStateCopycatBlock.getAcceptedBlockState(
+    String property,
+    Level level,
+    BlockPos pos,
+    ItemStack stack,
+    Direction face
+);
+
+void IMultiStateCopycatBlockEntity.setMaterial(
+    String property,
+    BlockState material
+);
+void IMultiStateCopycatBlockEntity.setConsumedItem(
+    String property,
+    ItemStack stack
+);
 
 static ItemRequirement ICopycatBlock.getRequiredItemsForLayer(
     BlockState state,
@@ -226,3 +281,13 @@ create a `CCCopycatBlockEntity`. Empty material is verified with the common
 `ICopycatBlockEntity.hasCustomMaterial()` method. For a multistate block
 entity, the addon additionally checks that
 `MaterialItemStorage.getAllConsumedItems()` is empty.
+
+For Roller material filling, `ICopycatBlock.getAcceptedBlockState(...)`
+provides the same material validation used by normal player interaction. The
+addon passes `Direction.UP`, matching a Roller approaching the Copycat from
+above. A single-state Copycat stores one size-one consumed item. For a
+multistate Copycat, only properties for which `partExists(...)` is true and
+which still have the default material are changed; each such property stores
+and consumes one item. Simulation and exact extraction complete before any
+block entity mutation, and the original material storage is restored if
+post-assignment verification fails.

@@ -76,6 +76,10 @@ public record TrackSurfaceSample(
         return minimumSurfaceY(-0.5, 0.5, -0.5, 0.5);
     }
 
+    public double maximumCellSurfaceY() {
+        return maximumSurfaceY(-0.5, 0.5, -0.5, 0.5);
+    }
+
     public double lowSlopeEdgeSurfaceY() {
         Direction uphill = uphillDirection();
         return slopeEdgeSurfaceY(uphill.getOpposite());
@@ -116,6 +120,25 @@ public record TrackSurfaceSample(
         double maximumOffset
     ) {
         return gradient * (gradient >= 0 ? minimumOffset : maximumOffset);
+    }
+
+    private double maximumSurfaceY(
+        double minimumX,
+        double maximumX,
+        double minimumZ,
+        double maximumZ
+    ) {
+        return surfaceY
+            + maximumContribution(gradientX, minimumX, maximumX)
+            + maximumContribution(gradientZ, minimumZ, maximumZ);
+    }
+
+    private static double maximumContribution(
+        double gradient,
+        double minimumOffset,
+        double maximumOffset
+    ) {
+        return gradient * (gradient >= 0 ? maximumOffset : minimumOffset);
     }
 
     /**

@@ -28,6 +28,10 @@ import dev.example.copycatroller.CopycatRollerConfig;
 import dev.example.copycatroller.paving.CopycatPlacement;
 import dev.example.copycatroller.paving.CopycatLayerPavingService;
 import dev.example.copycatroller.paving.CopycatLayerPavingService.PlacementResult;
+import dev.example.copycatroller.paving.CopycatMaterialFillingService;
+import dev.example.copycatroller.paving.CopycatMaterialFillingService.FillPassResult;
+import dev.example.copycatroller.paving.CopycatMaterialFillingService.FillResult;
+import dev.example.copycatroller.paving.CopycatMaterialFillingService.MaterialFillPlan;
 import dev.example.copycatroller.paving.CopycatPavingMaterial;
 import dev.example.copycatroller.paving.LayerMath;
 import dev.example.copycatroller.paving.PreciseTrackHeightSampler;
@@ -94,6 +98,484 @@ public final class CopycatRollerGameTests {
             helper,
             !invokeMaterialPredicate(roller, new ItemStack(CCBlocks.COPYCAT_SLICE.asItem())),
             "Mechanical Roller accepted a different incomplete copycat"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillsEmptyCopycat(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            4,
+            inventory(4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.STONE, 3);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.SUCCESS, "Roller material fill did not succeed");
+        assertLayer(helper, position, 4);
+        assertSingleMaterial(helper, position, Blocks.STONE.defaultBlockState());
+        check(helper, count(materialInventory) == 2, "single-state Copycat did not consume one block");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillSupportsOtherCopycatShapes(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        BlockState sliceState = CCBlocks.COPYCAT_SLICE.getDefaultState();
+        helper.getLevel().setBlockAndUpdate(position, sliceState);
+        ItemStackHandler materialInventory = blockInventory(Blocks.STONE, 2);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.SUCCESS, "another Copycat shape was not material-filled");
+        check(helper, helper.getLevel().getBlockState(position).equals(sliceState), "Copycat shape state changed");
+        assertSingleMaterial(helper, position, Blocks.STONE.defaultBlockState());
+        check(helper, count(materialInventory) == 1, "another Copycat shape did not consume one block");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillProtectsExistingMaterial(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            4,
+            inventory(4)
+        );
+        ICopycatBlockEntity copycat =
+            (ICopycatBlockEntity) helper.getLevel().getBlockEntity(position);
+        copycat.setMaterial(Blocks.STONE.defaultBlockState());
+        copycat.setConsumedItem(new ItemStack(Blocks.STONE));
+        ItemStackHandler materialInventory = blockInventory(Blocks.DIRT, 2);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.DIRT),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.PASS, "existing material was not treated as complete");
+        assertSingleMaterial(helper, position, Blocks.STONE.defaultBlockState());
+        check(helper, count(materialInventory) == 2, "existing material consumed another block");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillUsesOneBlockPerExistingHalf(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 3, 5),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 8)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.STONE, 3);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.SUCCESS, "Half Layer material fill failed");
+        assertHalfLayer(helper, position, Direction.Axis.X, 3, 5);
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.NEGATIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        check(helper, count(materialInventory) == 1, "two existing halves did not consume two blocks");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillSkipsMissingHalf(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.Z, 0, 5),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 5)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.STONE, 2);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.SUCCESS, "single existing half was not filled");
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+            Blocks.STONE.defaultBlockState()
+        );
+        IMultiStateCopycatBlockEntity copycat =
+            (IMultiStateCopycatBlockEntity) helper.getLevel().getBlockEntity(position);
+        var negative = copycat.getMaterialItemStorage().getMaterialItem(
+            CopycatHalfLayerBlock.NEGATIVE_LAYERS.getName()
+        );
+        check(helper, !negative.hasCustomMaterial(), "missing half received a material");
+        check(helper, negative.consumedItem().isEmpty(), "missing half consumed a block");
+        check(helper, count(materialInventory) == 1, "single existing half did not consume one block");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillIsAtomicForMultistateCopycat(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 2, 2),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.STONE, 1);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.FAIL, "underfunded multistate fill did not fail");
+        assertEmptyMaterial(helper, position, CopycatPavingMaterial.HALF_LAYER);
+        check(helper, count(materialInventory) == 1, "failed multistate fill consumed a block");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillRejectsUnsupportedMaterial(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            4,
+            inventory(4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.CHEST, 2);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.CHEST),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.PASS, "unsupported material was not safely skipped");
+        assertEmptyMaterial(helper, position);
+        check(helper, count(materialInventory) == 2, "unsupported material consumed an item");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialFillRequiresExactInventoryItem(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            4,
+            inventory(4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.DIRT, 2);
+
+        FillResult result = CopycatMaterialFillingService.tryFill(
+            helper.getLevel(),
+            position,
+            new ItemStack(Blocks.STONE),
+            materialInventory
+        );
+
+        check(helper, result == FillResult.FAIL, "different inventory block funded the material");
+        assertEmptyMaterial(helper, position);
+        check(helper, count(materialInventory) == 2, "different inventory block was consumed");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialPassFindsFractionalSurfaceCell(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            4,
+            inventory(4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.GRAVEL, 2);
+        TrackSurfaceSample sample = new TrackSurfaceSample(
+            position.getX(),
+            position.getZ(),
+            position.getY() - 0.5
+        );
+
+        FillPassResult result = CopycatMaterialFillingService.fillSamples(
+            helper.getLevel(),
+            List.of(sample),
+            new ItemStack(Blocks.GRAVEL),
+            materialInventory
+        );
+
+        check(helper, result.foundSurfaceCopycat(), "fractional surface Copycat was not found");
+        check(helper, result.changed(), "fractional surface Copycat was not filled");
+        assertSingleMaterial(helper, position, Blocks.GRAVEL.defaultBlockState());
+        check(helper, count(materialInventory) == 1, "fractional surface used the wrong material cost");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialPassLeavesEmptyColumnsUntouched(GameTestHelper helper) {
+        BlockPos copycatPosition = resetTarget(helper);
+        BlockPos emptyPosition = copycatPosition.east();
+        helper.getLevel().setBlockAndUpdate(emptyPosition, Blocks.AIR.defaultBlockState());
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            copycatPosition,
+            4,
+            inventory(4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.GRAVEL, 2);
+
+        FillPassResult result = CopycatMaterialFillingService.fillSamples(
+            helper.getLevel(),
+            List.of(
+                new TrackSurfaceSample(
+                    copycatPosition.getX(),
+                    copycatPosition.getZ(),
+                    copycatPosition.getY() - 0.5
+                ),
+                new TrackSurfaceSample(
+                    emptyPosition.getX(),
+                    emptyPosition.getZ(),
+                    emptyPosition.getY() - 0.5
+                )
+            ),
+            new ItemStack(Blocks.GRAVEL),
+            materialInventory
+        );
+
+        check(helper, result.foundSurfaceCopycat(), "material pass did not find its Copycat");
+        check(helper, result.changed(), "material pass did not fill its Copycat");
+        check(helper, helper.getLevel().getBlockState(emptyPosition).isAir(), "empty column received gravel");
+        check(helper, count(materialInventory) == 1, "empty column consumed gravel");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialPassChoosesClosestSurface(GameTestHelper helper) {
+        BlockPos upperPosition = resetTarget(helper);
+        BlockPos lowerPosition = upperPosition.below();
+        helper.getLevel().setBlockAndUpdate(lowerPosition, Blocks.AIR.defaultBlockState());
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            lowerPosition,
+            8,
+            inventory(8)
+        );
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            upperPosition,
+            4,
+            inventory(4)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.GRAVEL, 2);
+
+        FillPassResult result = CopycatMaterialFillingService.fillSamples(
+            helper.getLevel(),
+            List.of(new TrackSurfaceSample(
+                upperPosition.getX(),
+                upperPosition.getZ(),
+                upperPosition.getY() - 0.5
+            )),
+            new ItemStack(Blocks.GRAVEL),
+            materialInventory
+        );
+
+        check(helper, result.changed(), "closest Copycat surface was not filled");
+        assertSingleMaterial(helper, upperPosition, Blocks.GRAVEL.defaultBlockState());
+        assertEmptyMaterial(helper, lowerPosition);
+        check(helper, count(materialInventory) == 1, "more than one vertical Copycat was filled");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialPassFindsSlopedHalfLayer(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            position,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(
+                Direction.Axis.X,
+                3,
+                5
+            ),
+            inventory(CopycatPavingMaterial.HALF_LAYER, 8)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.GRAVEL, 2);
+
+        FillPassResult result = CopycatMaterialFillingService.fillSamples(
+            helper.getLevel(),
+            List.of(new TrackSurfaceSample(
+                position.getX(),
+                position.getZ(),
+                position.getY() - 0.5,
+                1,
+                0,
+                0.25,
+                0
+            )),
+            new ItemStack(Blocks.GRAVEL),
+            materialInventory
+        );
+
+        check(helper, result.foundSurfaceCopycat(), "sloped Half Layer was not found");
+        check(helper, result.changed(), "sloped Half Layer was not material-filled");
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.NEGATIVE_LAYERS.getName(),
+            Blocks.GRAVEL.defaultBlockState()
+        );
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatHalfLayerBlock.POSITIVE_LAYERS.getName(),
+            Blocks.GRAVEL.defaultBlockState()
+        );
+        check(helper, count(materialInventory) == 0, "sloped Half Layer used the wrong material cost");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void rollerMaterialPassRejectsDistantDecorativeCopycat(GameTestHelper helper) {
+        BlockPos surfacePosition = resetTarget(helper).above();
+        BlockPos decorativePosition = surfacePosition.below(2);
+        helper.getLevel().setBlockAndUpdate(decorativePosition, Blocks.AIR.defaultBlockState());
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            decorativePosition,
+            8,
+            inventory(8)
+        );
+        ItemStackHandler materialInventory = blockInventory(Blocks.GRAVEL, 1);
+
+        FillPassResult result = CopycatMaterialFillingService.fillSamples(
+            helper.getLevel(),
+            List.of(new TrackSurfaceSample(
+                surfacePosition.getX(),
+                surfacePosition.getZ(),
+                surfacePosition.getY() - 0.5
+            )),
+            new ItemStack(Blocks.GRAVEL),
+            materialInventory
+        );
+
+        check(helper, !result.foundSurfaceCopycat(), "distant decorative Copycat activated material mode");
+        check(helper, !result.changed(), "distant decorative Copycat was filled");
+        assertEmptyMaterial(helper, decorativePosition);
+        check(helper, count(materialInventory) == 1, "distant decorative Copycat consumed gravel");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void materialPlanRedirectsFullCopycatBaseBelow(GameTestHelper helper) {
+        BlockPos copycatPosition = resetTarget(helper);
+        BlockPos emptyNeighbor = copycatPosition.east();
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            copycatPosition,
+            8,
+            inventory(8)
+        );
+
+        MaterialFillPlan plan = CopycatMaterialFillingService.planSamples(
+            helper.getLevel(),
+            List.of(
+                new TrackSurfaceSample(
+                    copycatPosition.getX(),
+                    copycatPosition.getZ(),
+                    copycatPosition.getY()
+                ),
+                new TrackSurfaceSample(
+                    emptyNeighbor.getX(),
+                    emptyNeighbor.getZ(),
+                    emptyNeighbor.getY()
+                )
+            ),
+            new ItemStack(Blocks.GRAVEL)
+        );
+
+        check(helper, plan.protects(copycatPosition), "full Copycat was not protected");
+        check(
+            helper,
+            plan.redirectCreateBase(copycatPosition).equals(copycatPosition.below()),
+            "full Copycat base was not redirected to its support cell"
+        );
+        check(
+            helper,
+            plan.redirectCreateBase(emptyNeighbor).equals(emptyNeighbor),
+            "empty neighboring column was redirected away from Create"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void materialPlanLeavesPartialSurfaceBaseToCreate(GameTestHelper helper) {
+        BlockPos copycatPosition = resetTarget(helper);
+        CopycatLayerPavingService.tryPlace(
+            helper.getLevel(),
+            copycatPosition,
+            4,
+            inventory(4)
+        );
+        BlockPos createBase = copycatPosition.below();
+
+        MaterialFillPlan plan = CopycatMaterialFillingService.planSamples(
+            helper.getLevel(),
+            List.of(new TrackSurfaceSample(
+                copycatPosition.getX(),
+                copycatPosition.getZ(),
+                copycatPosition.getY() - 0.5
+            )),
+            new ItemStack(Blocks.GRAVEL)
+        );
+
+        check(helper, plan.protects(copycatPosition), "partial Copycat was not protected");
+        check(
+            helper,
+            plan.redirectCreateBase(createBase).equals(createBase),
+            "partial Copycat incorrectly redirected Create's base support"
         );
         helper.succeed();
     }
@@ -934,6 +1416,11 @@ public final class CopycatRollerGameTests {
                 false,
                 CopycatRoller.class.getClassLoader()
             );
+            Class.forName(
+                "dev.example.copycatroller.paving.CopycatMaterialFillingService",
+                false,
+                CopycatRoller.class.getClassLoader()
+            );
         } catch (ClassNotFoundException | LinkageError exception) {
             helper.fail("common code failed server classloading: " + exception);
         }
@@ -1068,6 +1555,15 @@ public final class CopycatRollerGameTests {
         return inventory;
     }
 
+    private static ItemStackHandler blockInventory(
+        net.minecraft.world.level.block.Block block,
+        int count
+    ) {
+        ItemStackHandler inventory = new ItemStackHandler(1);
+        inventory.setStackInSlot(0, new ItemStack(block, count));
+        return inventory;
+    }
+
     private static ItemStackHandler zincInventory(int slots, int count) {
         ItemStackHandler inventory = new ItemStackHandler(slots);
         inventory.setStackInSlot(0, new ItemStack(AllItems.ZINC_INGOT.get(), count));
@@ -1182,6 +1678,54 @@ public final class CopycatRollerGameTests {
         } else {
             check(helper, copycat.getConsumedItem().isEmpty(), "new Copycat Layer has a consumed material item");
         }
+    }
+
+    private static void assertSingleMaterial(
+        GameTestHelper helper,
+        BlockPos position,
+        BlockState expectedMaterial
+    ) {
+        Object blockEntity = helper.getLevel().getBlockEntity(position);
+        check(helper, blockEntity instanceof ICopycatBlockEntity, "expected Copycats+ block entity is missing");
+        ICopycatBlockEntity copycat = (ICopycatBlockEntity) blockEntity;
+        check(helper, copycat.getMaterial().is(expectedMaterial.getBlock()), "unexpected Copycat material");
+        check(
+            helper,
+            ItemStack.isSameItemSameComponents(
+                copycat.getConsumedItem(),
+                new ItemStack(expectedMaterial.getBlock())
+            ),
+            "Copycat stored the wrong consumed material item"
+        );
+        check(helper, copycat.getConsumedItem().getCount() == 1, "Copycat stored an invalid material item count");
+    }
+
+    private static void assertPartMaterial(
+        GameTestHelper helper,
+        BlockPos position,
+        String property,
+        BlockState expectedMaterial
+    ) {
+        Object blockEntity = helper.getLevel().getBlockEntity(position);
+        check(
+            helper,
+            blockEntity instanceof IMultiStateCopycatBlockEntity,
+            "expected multistate Copycats+ block entity is missing"
+        );
+        IMultiStateCopycatBlockEntity copycat =
+            (IMultiStateCopycatBlockEntity) blockEntity;
+        var stored = copycat.getMaterialItemStorage().getMaterialItem(property);
+        check(helper, stored != null, "Copycat material property is missing: " + property);
+        check(helper, stored.material().is(expectedMaterial.getBlock()), "unexpected material for " + property);
+        check(
+            helper,
+            ItemStack.isSameItemSameComponents(
+                stored.consumedItem(),
+                new ItemStack(expectedMaterial.getBlock())
+            ),
+            "wrong consumed material item for " + property
+        );
+        check(helper, stored.consumedItem().getCount() == 1, "invalid consumed item count for " + property);
     }
 
     private static void check(GameTestHelper helper, boolean condition, String message) {
