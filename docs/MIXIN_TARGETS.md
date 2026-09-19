@@ -27,11 +27,13 @@ four mixin classes only when both `create` and `copycats` are present in
    - Descriptor:
      `(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;)V`
    - `HEAD` injection: cancellable for the three exact Copycat Layer filters
-     and `create:zinc_ingot` in `STRAIGHT_FILL`. For every other nonempty
-     filter, it builds only the geometric Copycat plan, obtains Create's
-     provisional paving state, and runs the real `tryFill` transaction for
-     every planned Copycat position. It does not interpret third-party filter
-     data.
+     and `create:zinc_ingot` in `STRAIGHT_FILL`. Zinc is also intercepted in
+     `WIDE_FILL`: the central precise surface is retained and an outer
+     half-block shell is placed with Copycat Bytes. For every other nonempty
+     filter in `STRAIGHT_FILL`, it builds only the geometric Copycat plan,
+     obtains Create's provisional paving state, and runs the real `tryFill`
+     transaction for every planned Copycat position. It does not interpret
+     third-party filter data. Non-zinc `WIDE_FILL` is not intercepted.
    - `RETURN` injection: preserves `WaitingTicks`, `LastPos`, and stalling when
      material assignment was the only successful change in the pass.
    - `@ModifyArg`, second `tryFill` invocation (`ordinal=1`, argument index 1):

@@ -9,6 +9,7 @@ import net.minecraft.nbt.CompoundTag;
  * GameTest.
  */
 public final class RollerModeGate {
+    public static final int WIDE_FILL_ORDINAL = 2;
     public static final int STRAIGHT_FILL_ORDINAL = 1;
 
     private RollerModeGate() {
@@ -16,5 +17,9 @@ public final class RollerModeGate {
 
     public static boolean isStraightFill(CompoundTag rollerBlockEntityData) {
         return rollerBlockEntityData.getInt("ScrollValue") == STRAIGHT_FILL_ORDINAL;
+    }
+
+    public static boolean isWideFill(CompoundTag rollerBlockEntityData) {
+        return rollerBlockEntityData.getInt("ScrollValue") == WIDE_FILL_ORDINAL;
     }
 }

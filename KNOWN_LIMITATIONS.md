@@ -1,8 +1,8 @@
 # Known Limitations
 
 1. Compatibility is intentionally limited to Minecraft 1.21.1, Create 6, and
-   Copycats+ 3.0.4. The dependency ranges prevent the addon from silently
-   applying to the next release, while `require=1` stops startup if a Create
+   Copycats+ 3.0.x. The dependency ranges prevent the addon from silently
+   applying to the next major release, while `require=1` stops startup if a Create
    method signature changes.
 
 2. A precise profile is available only for a train contraption when
@@ -13,8 +13,8 @@
 3. The default is `surfaceOnly=true`: support blocks are not created beneath
    the upper partial cell. A Copycat block may therefore appear to float if
    there is no existing foundation below it. The previous downward-filling
-   behavior is available through `surfaceOnly=false`; only that mode uses
-   `fillDepthBlocks` and Create's `rollerFillDepth + 1` limit.
+   behavior is available through `surfaceOnly=false`; only that legacy central
+   fill uses `fillDepthBlocks`, capped by Create's Roller depth.
 
 4. In `DOWN` mode, the addon may intentionally leave a gap of at most 1/8 of a
    block. This is the user-selected downward-rounding behavior.
@@ -36,8 +36,8 @@
    because the public `PaveTask` already contains a rounded Y value.
 
 8. `RollingMode` is package-private in Create 6. The centralized
-   `STRAIGHT_FILL=1` ordinal is used; a required GameTest verifies the names and
-   order of all three enum values.
+   `STRAIGHT_FILL=1` and `WIDE_FILL=2` ordinals are used; a required
+   GameTest verifies the names and order of all three enum values.
 
 9. Create's mounted storage runs synchronously on the server thread. There is
    no concurrent window between the separate simulation and the exact real
@@ -47,8 +47,9 @@
    no longer be inserted is safely dropped into the world and logged.
 
 10. Automatic mode uses the exact ID `create:zinc_ingot`; `zink_ingot` does
-    not exist in the registry. Change is stored as real
-    `copycats:copycat_half_layer` items. If extracting one ingot does not free
+    not exist in the registry. Straight Fill change is stored as real
+    `copycats:copycat_half_layer` items; Wide Fill change is stored as real
+    `copycats:copycat_byte` items. If extracting one ingot does not free
     a mounted-storage slot and an existing Half Layer stack cannot accept all
     of the change, the entire placement is cancelled. The addon intentionally
     uses neither a hidden balance nor world drops for normal change.
@@ -85,8 +86,24 @@
 
 15. Third-party filter compatibility is protocol-based rather than tied to a
     list of mods. A compatible filter must resolve its material synchronously
-    during Create's normal `tryFill` call, consume the selected `BlockItem`
-    from the mounted `IItemHandler`, and reach `Level.setBlockAndUpdate` for
-    the target position. A mod that bypasses this complete transaction, writes
+    during Create's normal `tryFill` call and reach `Level.setBlockAndUpdate`
+    for the target position. The selected `BlockItem` is normally identified
+    from the mounted-inventory deduction. For bottomless inventories such as a
+    Creative Crate, the unchanged matching stack is resolved from Create's
+    planned block state. A mod that bypasses this complete transaction, writes
     blocks later or asynchronously, or represents material without a
     `BlockItem` cannot be inferred safely and needs a dedicated integration.
+
+16. Zinc Wide Fill creates two outer lateral surface strips, not a solid
+    embankment. For a side-by-side row, only its two edge Rollers create Bytes,
+    and each edge Roller emits only away from the row. Interior Rollers retain
+    normal central Layer/Half Layer paving and emit no Bytes. A single Roller
+    owns both sides. The first side Byte matches the central surface height;
+    every following half-block step lowers by one half block. Maximum reach is
+    `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill radius.
+    A solid obstacle terminates only the affected branch, which prevents
+    placement through walls but can leave an intentional opening.
+
+17. Copycat Byte is reserved for automatic zinc Wide Fill and is not accepted
+    as a direct Roller filter. Non-zinc Wide Fill, Tunnel Pave, and all unrelated
+    filters retain Create's standard behavior.

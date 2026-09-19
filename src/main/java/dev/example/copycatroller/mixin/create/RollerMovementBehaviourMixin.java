@@ -4,6 +4,7 @@ import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import dev.example.copycatroller.paving.CopycatLayerPavingService;
+import dev.example.copycatroller.paving.CopycatWideFillPavingService;
 import dev.example.copycatroller.paving.CopycatMaterialFillingService;
 import dev.example.copycatroller.paving.CopycatMaterialFillingService.MaterialFillPlan;
 import dev.example.copycatroller.paving.CopycatPavingMaterial;
@@ -61,6 +62,29 @@ public abstract class RollerMovementBehaviourMixin {
         Optional<CopycatPavingMaterial> material =
             CopycatLayerPavingService.materialFor(filter);
         boolean zincMode = CopycatLayerPavingService.isZincIngot(filter);
+        if (zincMode && RollerModeGate.isWideFill(context.blockEntityData)) {
+            callback.cancel();
+            if (context.world.isClientSide) {
+                return;
+            }
+
+            PaveTask trackProfile = createHeightProfileForTracks(context);
+            boolean paved = CopycatLayerPavingService.paveWithZinc(
+                context,
+                position,
+                trackProfile
+            );
+            paved |= CopycatWideFillPavingService.pave(
+                context,
+                position,
+                trackProfile
+            );
+            if (paved) {
+                copycatRoller$markPaved(context, position);
+            }
+            return;
+        }
+
         if (!RollerModeGate.isStraightFill(context.blockEntityData)) {
             return;
         }

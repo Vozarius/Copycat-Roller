@@ -1,6 +1,6 @@
 # Build and Test Report
 
-Test environment:
+Release verification environment:
 
 - Windows 11 amd64
 - Oracle JDK 21.0.9 LTS
@@ -8,218 +8,65 @@ Test environment:
 - Minecraft 1.21.1
 - NeoForge 21.1.219
 - Create 6
-- Copycats+ 3.0.4
+- Copycats+ 3.0.9
 
-## Commands
-
-```powershell
-.\gradlew.bat test
-.\gradlew.bat runGameTestServer
-.\gradlew.bat build
-```
-
-Final combined run:
+## Commands and results
 
 ```powershell
-.\gradlew.bat build runGameTestServer --console=plain
-```
-
-Final clean verification of version 1.0:
-
-```powershell
-.\gradlew.bat clean build --console=plain
+.\gradlew.bat build --console=plain
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-Result: the clean build completed successfully in `12 s`; all 23 unit tests
-passed. The dedicated GameTest server without optional filter mods completed
-all `53/53` required tests in `1.143 s`.
+The final version 1.1 build completed successfully. All 35 unit tests passed
+with zero failures and zero errors. The dedicated NeoForge GameTest server
+loaded Copycat Roller 1.1, Create 6, and Copycats+ 3.0.9, then passed all
+58/58 required GameTests in 1.150 seconds. The server run also verifies that
+common code does not load client-only classes.
 
-The same dedicated suite was then run with the user-provided
-`createrandomizefilters-1.0.7.jar` in the GameTest runtime:
+The final build took 14 seconds; the dedicated GameTest run took 20 seconds.
 
-```powershell
-.\gradlew.bat runGameTestServer --console=plain
-```
+## Version 1.1 coverage
 
-Both Roller mixin sets applied successfully, and all `53/53` tests passed in
-`1.390 s`. The conditional integration test confirmed that Randomize Filters
-selected gravel despite a different provisional state, assigned gravel to
-both existing Half Layer parts, and consumed exactly two gravel blocks. The
-optional JAR was removed from the runtime after the test and is not packaged
-or declared as a dependency.
+The new unit tests verify:
 
-Earlier compatibility checks were performed with both the lowest
-Copycats+-compatible Create 6 build and the highest available Create 6 build.
-In both cases, the project built successfully, the dedicated server started,
-and all `49/49` tests present at that time passed. The addon declares the
-complete Create 6 branch as its range; Copycats+ dependencies impose an
-additional effective lower bound on the assembled modpack.
+- one zinc ingot equals exactly eight Copycat Bytes;
+- existing Byte items are consumed before zinc;
+- exact change conservation and invalid payment inputs;
+- Bytes are emitted only along the local lateral axis, never longitudinally;
+- one-sided seeds emit only outward and interior seeds emit no slope;
+- the first side Byte matches the central height;
+- each following outward half-block step lowers the surface by half a block;
+- the reach formula matches Create's Wide Fill radius;
+- adjacent longitudinal track samples merge into one lateral shell;
+- negative coordinates and a half-block track rise are rasterized correctly.
 
-Artifacts:
+The new GameTests verify:
 
-- `build/libs/copycat_roller-1.0.jar` — 113,471 bytes;
-- `build/libs/copycat_roller-1.0-sources.jar` — 48,478 bytes;
-- SHA-256 of the main JAR:
-  `B7E99A96273BA6211954334460201E5B131BE75469C3B44EF62B27F88770DC9D`.
+- three Byte parts consume one zinc ingot and return five Byte items;
+- eight Byte parts consume exactly one ingot with no change;
+- an inventory that cannot hold the change leaves both inventory and world
+  unchanged;
+- `WIDE_FILL` remains a separately guarded mode in the runtime enum order;
+- Copycat Byte is internal to zinc Wide Fill and is not accepted as a direct
+  Roller filter;
+- only the two ends of a same-height, same-facing Roller row own outward Wide
+  Fill sides; interior Rollers own none and a single Roller owns both;
+- Create Creative Crates supply Copycat shapes, zinc conversion, and material
+  filling without changing their infinite source stack.
 
-## Unit Tests
+The existing suite still covers precise straight, diagonal, and Bezier track
+profiles, Layer/Half Layer/Slope Layer geometry, atomic inventory handling,
+material assignment, normal Create paving fallback, third-party filter
+transactions, unloaded chunks, portals, solid blocks, and dedicated server
+classloading.
 
-`LayerMathTest` verifies:
+## Artifacts
 
-- `DOWN` and `UP` modes for values from `0.0` through `0.999999`;
-- noise around 1/8 boundaries;
-- negative world Y coordinates;
-- transitions across an integer coordinate;
-- height quantization for the negative and positive halves of a Half Layer,
-  including values that cross cell boundaries;
-- `DOWN` as the default for pure mathematical operations;
-- equivalence to the standard lower-slab behavior at `fraction=0.5`:
-  `layers=8` below and `layers=4` above in `UP` mode.
+- `build/libs/copycat_roller-1.1.jar` — 137,222 bytes
+  - SHA-256: `8F56C5B0207E6446C289417F8EA4925CD783D14F374C055E901C2D0DCB00CF61`
+- `build/libs/copycat_roller-1.1-sources.jar` — 56,216 bytes
+  - SHA-256: `07460359EA82FFD6499027DAAEB53A7CE93FBB6FD1CB4AE1F0489180BA7B1F4E`
 
-`PavingLimitsTest` verifies the default depth of one nearest block, a custom
-depth, and the standard `rollerFillDepth + 1` limit.
-
-`SlopeLayerGeometryTest` verifies:
-
-- the exact low- and high-edge heights of all eight Copycats+ states;
-- selection of representable 1/4 and 1/2 slopes;
-- rejection of an intermediate state that would create a sawtooth;
-- rejection of any state that intersects either edge of the profile.
-
-`ZincCreditMathTest` verifies:
-
-- the cost of a standard Layer at two half-layer units per layer;
-- the cost of both Half Layer sides at one unit each;
-- exact change from one or more zinc ingots;
-- priority of previously stored Half Layer items over a new ingot;
-- conservation for all costs in `1..16` and stored-change amounts in `0..16`;
-- rejection of invalid input values.
-
-## NeoForge GameTests
-
-The suite contains 53 required tests:
-
-1. the exact Layer, Half Layer, Slope Layer, and `create:zinc_ingot` items are
-   accepted by the Roller filter, and the exact zinc registry ID is confirmed;
-2. another partial Copycat block remains rejected;
-3. a horizontal profile does not create a partial upper layer;
-4. a half-block slope creates `layers=4` above;
-5. default configuration values are `DOWN`, `surfaceOnly=true`, one nearest
-   block, and a Slope Layer tolerance of `0.25`;
-6. standard Layer states are correct for 1/8 through 7/8;
-7. Half Layer properties remain independent and their combined cost is exact;
-8. both Half Layer halves use a conservative minimum height;
-9. Half Layer does not protrude on a diagonal or transverse slope;
-10. only the upper shell is placed, without a full base block or excess cost;
-11. a full state is skipped on a level profile at an integer height;
-12. Half Layer growth is atomic and incremental;
-13. Slope Layer `facing` points uphill and `layers=4` represents 1/2;
-14. Slope Layer `facing` reverses when the slope direction changes;
-15. a Slope Layer state that would create a sawtooth is skipped, while a
-    representable quarter-slope is retained;
-16. a full Half Layer costs `16` and a full Slope Layer costs `8`;
-17. a user-assigned material in a multistate Half Layer is protected;
-18. a standard Layer with `layers=N` consumes `N` items;
-19. a full standard Layer consumes eight items;
-20. insufficient inventory causes an atomic rejection;
-21. growing a standard Layer from 3 to 6 costs three items;
-22. a user-assigned material in a standard Layer is protected;
-23. repeating a pass is idempotent;
-24. an unloaded chunk is protected;
-25. a solid block and a portal are protected;
-26. diagonal and Bezier X/Z coverage matches Create while preserving
-    unrounded Y, the tangent, and the gradient direction;
-27. the compatibility branch has a strict scope, and the runtime
-    `RollingMode` order is verified;
-28. common code loads on a dedicated GameTest server;
-29. equal heights on both halves in zinc mode produce a standard Layer;
-30. unequal heights produce a Half Layer with the correct axis and two layer
-    values;
-31. a partial standard Layer consumes one ingot and preserves exact change;
-32. the next Half Layer operation consumes the preserved change without
-    requiring a new ingot;
-33. one ingot produces exactly either a full Layer with `layers=8` or a full
-    Half Layer with `8 + 8`, with no change;
-34. insufficient space for change atomically cancels the operation without
-    changing the world or inventory;
-35. an ordinary block filter assigns its material to an empty single-state
-    Copycat and consumes exactly one matching block;
-36. an existing player-assigned material is preserved without further
-    consumption;
-37. a Half Layer with two existing parts receives material on both sides and
-    consumes two blocks;
-38. an absent Half Layer side remains empty and consumes nothing;
-39. insufficient material for every existing multistate part leaves both the
-    Copycat and inventory unchanged;
-40. a material rejected by Copycats+ is skipped without consumption;
-41. a different inventory block cannot fund the selected filter material;
-42. material filling also supports another Copycats+ shape without changing
-    its block state;
-43. a fractional track surface finds the Copycat in the adjacent vertical cell;
-44. the material-assignment service leaves empty neighboring columns for
-    Create instead of mutating them itself;
-45. stacked Copycats are resolved to the surface closest to the track;
-46. a sloped Half Layer is found and both existing parts are filled;
-47. a decorative Copycat more than one block below the expected surface is
-    ignored;
-48. a full Copycat base is protected and its ordinary full-block target is
-    redirected exactly one block downward;
-49. a partial upper Copycat is protected while Create's base target remains
-    unchanged;
-50. a multistate Copycat treats the block already extracted by Create as
-    prepaid and consumes only the remaining exact per-part cost;
-51. an underfunded prepaid multistate operation returns the already extracted
-    block and leaves every Copycat part unchanged;
-52. an ordinary block filter passes through Create's real `tryFill`
-    transaction and pays the exact multistate cost without any optional mod;
-53. when Create: Randomize Filters 1.0.7 is present, its actual per-position
-    selection is captured and applied without a compile-time dependency.
-
-## Diagnostic Iterations
-
-- The initial dependency on a missing `slim` classifier for Create was
-  replaced with the complete official artifact.
-- An attempt to place a mixin in Create's Java package was rejected by JPMS as
-  a split package. The mixins were moved into the addon's package, the mode
-  ordinal was centralized, and a GameTest now guards it.
-- The extended horizontal-profile test found Create's internal half-block
-  offset. The sampler was corrected so that the offset used to select a
-  `BlockPos` does not create a false four-layer surface on level track.
-- The first extended GameTest run completed 23 of 24 tests: the auxiliary full
-  Slope Layer position was outside the template's cleared area. The position
-  was moved inside the test column; the repeated and final clean runs
-  completed all 24 of 24 tests.
-- The first clean 1.3.0 run found fixed world X/Z coordinates in the auxiliary
-  upper-shell test. With randomized template placement, the position could
-  fall into an unloaded chunk. The test was changed to
-  `helper.absolutePos(...)`; the repeated clean run completed all 28 of 28
-  tests.
-- Zinc mode initially checked for change-storage capacity before extracting
-  the ingot. That incorrectly rejected the valid case of one ingot in the
-  only slot, because extracting the ingot itself frees the slot. The operation
-  order was changed to synchronous extraction, change insertion, and full
-  rollback on failure. Dedicated GameTests confirm both the successful
-  single-slot case and the atomic failure when a stack of two ingots does not
-  free the slot.
-- The first material-filling branch intercepted each `tryFill(...)` target.
-  Real track testing showed that this could miss a Copycat in an adjacent
-  vertical cell and pass the wrong targets back to Create. Geometry selection
-  was therefore moved to a precomputed `triggerPaver(...)` plan.
-- The next implementation resolved the literal filter item at
-  `triggerPaver(...)` HEAD. Inspection of Randomize Filters 1.0.7 showed that
-  its actual per-position block exists only after its `ItemHelper.extract`
-  redirect runs inside `tryFill`. The addon now probes that real transaction,
-  snapshots mounted inventory, and intercepts only the final
-  `Level.setBlockAndUpdate`.
-- The first probe used `Class.getDeclaredMethod` to access protected
-  `tryFill`. Broad reflection caused a dedicated server to resolve a
-  client-only `MultiBufferSource` type from an unrelated method. It was
-  replaced with a lazy `MethodHandle` lookup using the exact `tryFill`
-  descriptor. Both dedicated test configurations now load cleanly.
-
-The server log still contains warnings from the Copycats+, Flywheel, and
-Ponder mixin configurations: compatibility level, repeated `@Unique`
-annotations, and a missing Ponder development refmap. These warnings also
-occur without the addon, do not involve any of Copycat Roller's four mixin
-classes, and did not prevent the injections or tests from succeeding.
+Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
+compatibility metadata and development refmaps. They also occur without this
+addon and did not prevent any required injection or test from succeeding.

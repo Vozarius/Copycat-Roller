@@ -113,7 +113,12 @@ public final class RollerMaterialPlacementCapture {
             position,
             plannedState,
             deductions
-        );
+        ).or(() -> selectUndeductedMaterial(
+            capture.inventory,
+            level,
+            position,
+            plannedState
+        ));
         if (selected.isEmpty()) {
             for (ItemStack deduction : deductions) {
                 CopycatMaterialFillingService.refundObservedExtraction(
@@ -226,6 +231,41 @@ public final class RollerMaterialPlacementCapture {
         return Optional.empty();
     }
 
+    /**
+     * Bottomless mounted inventories, including Create's Creative Crate, do
+     * not change when Create extracts its selected block. In that case the
+     * planned state is the authoritative result of Create's own filter logic.
+     */
+    private static Optional<ItemStack> selectUndeductedMaterial(
+        IItemHandler inventory,
+        Level level,
+        BlockPos position,
+        BlockState plannedState
+    ) {
+        ItemStack selected = ItemStack.EMPTY;
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            ItemStack candidate = inventory.getStackInSlot(slot);
+            if (!(candidate.getItem() instanceof BlockItem)
+                || Block.byItem(candidate.getItem()) != plannedState.getBlock()
+                || !CopycatMaterialFillingService.canAcceptMaterial(
+                    level,
+                    position,
+                    candidate
+                )) {
+                continue;
+            }
+            if (selected.isEmpty()) {
+                selected = candidate.copyWithCount(1);
+                continue;
+            }
+            if (!ItemStack.isSameItemSameComponents(selected, candidate)) {
+                return Optional.empty();
+            }
+        }
+        return selected.isEmpty()
+            ? Optional.empty()
+            : Optional.of(selected);
+    }
     private static Class<?> findPaveResultType() {
         try {
             return Class.forName(

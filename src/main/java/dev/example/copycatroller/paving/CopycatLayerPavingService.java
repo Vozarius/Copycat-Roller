@@ -1,9 +1,11 @@
 package dev.example.copycatroller.paving;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 import com.copycatsplus.copycats.CCBlocks;
+import com.copycatsplus.copycats.content.copycat.bytes.CopycatByteBlock;
 import com.copycatsplus.copycats.content.copycat.half_layer.CopycatHalfLayerBlock;
 import com.copycatsplus.copycats.content.copycat.layer.CopycatLayerBlock;
 import com.copycatsplus.copycats.content.copycat.slope_layer.CopycatSlopeLayerBlock;
@@ -280,6 +282,9 @@ public final class CopycatLayerPavingService {
                 roundingDirection,
                 slopeMaxVerticalError
             );
+            case BYTE -> throw new IllegalArgumentException(
+                "Copycat Byte is reserved for zinc Wide Fill"
+            );
         };
     }
 
@@ -336,7 +341,7 @@ public final class CopycatLayerPavingService {
     ) {
         if (material == CopycatPavingMaterial.SLOPE_LAYER) {
             throw new IllegalArgumentException(
-                "automatic zinc paving supports only Layer and Half Layer"
+                "automatic zinc paving supports Layer, Half Layer, and internal Byte placement"
             );
         }
         return tryPlaceInternal(
@@ -461,6 +466,9 @@ public final class CopycatLayerPavingService {
                     ? Optional.empty()
                     : Optional.of(slopeLayerStateFor(sample.uphillDirection(), layers));
             }
+            case BYTE -> throw new IllegalArgumentException(
+                "Copycat Byte has no track-column upper state"
+            );
         };
     }
 
@@ -602,6 +610,9 @@ public final class CopycatLayerPavingService {
             case LAYER -> stateFor(8);
             case HALF_LAYER -> halfLayerStateFor(sample.longitudinalAxis(), 8, 8);
             case SLOPE_LAYER -> slopeLayerStateFor(sample.uphillDirection(), 8);
+            case BYTE -> throw new IllegalArgumentException(
+                "Copycat Byte has no full track-column state"
+            );
         };
     }
 
@@ -644,6 +655,22 @@ public final class CopycatLayerPavingService {
             .setValue(CopycatSlopeLayerBlock.HALF, Half.BOTTOM)
             .setValue(CopycatSlopeLayerBlock.LAYERS, layers)
             .setValue(BlockStateProperties.WATERLOGGED, false);
+    }
+
+    public static BlockState byteStateFor(
+        Collection<CopycatByteBlock.Byte> bytes
+    ) {
+        if (bytes.isEmpty()) {
+            throw new IllegalArgumentException("at least one Copycat Byte must be present");
+        }
+        BlockState state = CCBlocks.COPYCAT_BYTE.getDefaultState();
+        for (CopycatByteBlock.Byte bite : CopycatByteBlock.allBytes) {
+            state = state.setValue(
+                CopycatByteBlock.byByte(bite),
+                bytes.contains(bite)
+            );
+        }
+        return state.setValue(BlockStateProperties.WATERLOGGED, false);
     }
 
     private static Optional<BlockState> mergeExisting(
@@ -697,6 +724,17 @@ public final class CopycatLayerPavingService {
                     .setValue(CopycatSlopeLayerBlock.LAYERS, layers)
                     .setValue(BlockStateProperties.WATERLOGGED, false));
             }
+            case BYTE -> {
+                BlockState merged = existing;
+                for (CopycatByteBlock.Byte bite : CopycatByteBlock.allBytes) {
+                    merged = merged.setValue(
+                        CopycatByteBlock.byByte(bite),
+                        existing.getValue(CopycatByteBlock.byByte(bite))
+                            || requested.getValue(CopycatByteBlock.byByte(bite))
+                    );
+                }
+                yield Optional.of(merged.setValue(BlockStateProperties.WATERLOGGED, false));
+            }
         };
     }
 
@@ -746,12 +784,16 @@ public final class CopycatLayerPavingService {
         CopycatPavingMaterial material,
         int itemUnits
     ) {
+        if (material == CopycatPavingMaterial.BYTE) {
+            return payBytesWithZinc(level, position, inventory, itemUnits);
+        }
         int requiredCredits = switch (material) {
             case LAYER -> ZincCreditMath.creditsForLayers(itemUnits);
             case HALF_LAYER -> itemUnits;
             case SLOPE_LAYER -> throw new IllegalArgumentException(
                 "Slope Layer cannot be paid from automatic zinc mode"
             );
+            case BYTE -> throw new AssertionError("handled above");
         };
         int availableHalfLayers = countMatching(
             inventory,
@@ -882,6 +924,90 @@ public final class CopycatLayerPavingService {
         });
     }
 
+    private static Optional<PaymentReceipt> payBytesWithZinc(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        int requiredBytes
+    ) {
+        int availableBytes = countMatching(
+            inventory,
+            CopycatPavingMaterial.BYTE,
+            requiredBytes
+        );
+        ZincByteMath.PaymentPlan plan =
+            ZincByteMath.plan(requiredBytes, availableBytes);
+
+        if (plan.bytesToConsume() > 0) {
+            ItemStack simulatedBytes = ItemHelper.extract(
+                inventory,
+                CopycatPavingMaterial.BYTE.itemPredicate(),
+                plan.bytesToConsume(),
+                true
+            );
+            if (simulatedBytes.getCount() != plan.bytesToConsume()) {
+                return Optional.empty();
+            }
+        }
+        if (plan.zincIngotsToConsume() > 0) {
+            ItemStack simulatedZinc = ItemHelper.extract(
+                inventory,
+                CopycatLayerPavingService::isZincIngot,
+                plan.zincIngotsToConsume(),
+                true
+            );
+            if (simulatedZinc.getCount() != plan.zincIngotsToConsume()) {
+                return Optional.empty();
+            }
+        }
+
+        ItemStack extractedBytes = plan.bytesToConsume() == 0
+            ? ItemStack.EMPTY
+            : ItemHelper.extract(
+                inventory,
+                CopycatPavingMaterial.BYTE.itemPredicate(),
+                plan.bytesToConsume(),
+                false
+            );
+        if (extractedBytes.getCount() != plan.bytesToConsume()) {
+            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
+            return Optional.empty();
+        }
+
+        ItemStack extractedZinc = plan.zincIngotsToConsume() == 0
+            ? ItemStack.EMPTY
+            : ItemHelper.extract(
+                inventory,
+                CopycatLayerPavingService::isZincIngot,
+                plan.zincIngotsToConsume(),
+                false
+            );
+        if (extractedZinc.getCount() != plan.zincIngotsToConsume()) {
+            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
+            refundStack(level, position, inventory, extractedZinc, "zinc paving ingots");
+            return Optional.empty();
+        }
+
+        ItemStack change = byteStack(plan.byteChange());
+        ItemStack changeRemainder = change.isEmpty()
+            ? ItemStack.EMPTY
+            : ItemHandlerHelper.insertItemStacked(inventory, change.copy(), false);
+        if (!changeRemainder.isEmpty()) {
+            int insertedChange = change.getCount() - changeRemainder.getCount();
+            removeByteChange(inventory, insertedChange, position);
+            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
+            refundStack(level, position, inventory, extractedZinc, "zinc paving ingots");
+            logFailure("Could not store Copycat Byte conversion remainder at {}", position);
+            return Optional.empty();
+        }
+
+        return Optional.of(() -> {
+            removeByteChange(inventory, change.getCount(), position);
+            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
+            refundStack(level, position, inventory, extractedZinc, "zinc paving ingots");
+        });
+    }
+
     private static int countMatching(
         IItemHandler inventory,
         CopycatPavingMaterial material,
@@ -904,6 +1030,38 @@ public final class CopycatLayerPavingService {
                 CopycatPavingMaterial.HALF_LAYER.itemBlock().asItem(),
                 count
             );
+    }
+
+    private static ItemStack byteStack(int count) {
+        return count == 0
+            ? ItemStack.EMPTY
+            : new ItemStack(
+                CopycatPavingMaterial.BYTE.itemBlock().asItem(),
+                count
+            );
+    }
+
+    private static void removeByteChange(
+        IItemHandler inventory,
+        int count,
+        BlockPos position
+    ) {
+        if (count == 0) {
+            return;
+        }
+        ItemStack removed = ItemHelper.extract(
+            inventory,
+            CopycatPavingMaterial.BYTE.itemPredicate(),
+            count,
+            false
+        );
+        if (removed.getCount() != count) {
+            logFailure(
+                "Could not roll back {} Copycat Byte change items at {}",
+                count,
+                position
+            );
+        }
     }
 
     private static void removeHalfLayerChange(
@@ -936,6 +1094,13 @@ public final class CopycatLayerPavingService {
                 state.getValue(CopycatHalfLayerBlock.NEGATIVE_LAYERS)
                     + state.getValue(CopycatHalfLayerBlock.POSITIVE_LAYERS);
             case SLOPE_LAYER -> state.getValue(CopycatSlopeLayerBlock.LAYERS);
+            case BYTE -> {
+                int count = 0;
+                for (CopycatByteBlock.Byte bite : CopycatByteBlock.allBytes) {
+                    count += state.getValue(CopycatByteBlock.byByte(bite)) ? 1 : 0;
+                }
+                yield count;
+            }
         };
     }
 

@@ -1,76 +1,65 @@
 # Copycat Roller
 
-Create Mechanical Rollers, now with Copycats+ layers.
-
-Copycat Roller lets train-mounted Rollers follow straight, diagonal, and
-curved tracks with Copycats+ surfaces in 1/8-block steps.
+An addon that lets Create Mechanical Rollers build with Copycats+.
 
 ## Features
 
-- Precise Copycat paving along railway tracks
-- Support for Layer, Half Layer, and Slope Layer
+- Precise railway surfaces in 1/8-block steps
+- Copycat Layer, Half Layer, and Slope Layer filters
 - Automatic Layer/Half Layer selection with a Zinc Ingot
-- Blocks selected by Create or compatible Roller-filter mods fill Copycats
-- The same blocks continue normal Create paving in empty spaces
-- Safe inventory handling with no hidden material balance
+- Zinc-powered sloped fill made from Copycat Bytes in Wide Fill mode
+- Ordinary blocks fill existing Copycats and keep Create's normal paving behavior
+- Compatible with Roller filter mods that use Create's placement transaction
+- Creative Crate support for Copycats, zinc, and copied materials
+- Atomic item use: no hidden balance and no lost zinc
 
-## Roller Filters
+## Filters and modes
 
-Put one of these items in a Mechanical Roller's filter:
+In **Fill** (`STRAIGHT_FILL`) mode, use a Layer, Half Layer, Slope Layer, or
+Zinc Ingot to build the Copycat surface. A Zinc Ingot automatically chooses
+between Layer and Half Layer.
 
-- **Copycat Layer** — creates a surface with adjustable height
-- **Copycat Half Layer** — gives the two sides independent heights
-- **Copycat Slope Layer** — creates a slope when a suitable state exists
-- **Zinc Ingot** — automatically chooses Layer or Half Layer
-- **Any supported block or compatible modded filter** — applies the block
-  actually selected for each position to Copycats and continues normal Create
-  paving everywhere else
+In **Wide Fill** (`WIDE_FILL`) mode, a Zinc Ingot keeps normal central paving
+under every Roller. Only the two outermost Rollers in each side-by-side row
+build Byte slopes, and each one builds only outward. This prevents overlapping
+internal slopes. The first side Byte matches the height under the edge Roller;
+every following half-block step drops by half a block. Reach matches Create's
+normal Wide Fill radius, and obstacles stop only the affected branch.
 
-Addon paving is active in **Fill** (`STRAIGHT_FILL`) mode. Tunnel and Wide
-Fill keep their normal Create behavior.
+An ordinary block filter fills empty parts of existing Copycats with that
+material and still paves non-Copycat positions through Create. Compatible
+third-party filters are resolved from the block they actually choose for each
+position.
 
-Third-party filters do not need a Copycat Roller integration. Filters that use
-Create's normal Roller placement transaction are detected automatically.
+## Item use
 
-## Item Use
+- Layer or Slope Layer with `layers=N`: `N` matching items
+- Half Layer: `negative_layers + positive_layers` items
+- Zinc: one ingot equals 8 Layers, 16 Half Layers, or 8 Copycat Bytes
+- Copycat material: one block per empty Copycat part
 
-- A Layer or Slope Layer with `layers=N` costs `N` matching items.
-- A Half Layer costs `negative_layers + positive_layers`.
-- One Zinc Ingot produces up to 8 Layers or 16 Half Layers. Any change is
-  stored as real Half Layer items.
-- Filling a Copycat costs one material block per empty Copycat part. Blocks
-  placed by Create consume their normal additional items.
-
-Existing player-assigned Copycat materials are never overwritten. An
-operation is cancelled safely if its complete cost cannot be paid.
+All change is returned as real Copycats+ items. If the exact cost cannot be
+paid or the change cannot be stored, the world and inventory remain unchanged.
+Create Creative Crates work as infinite supplies for Copycats, zinc, and copied
+block materials. Player-assigned Copycat materials are never overwritten.
 
 ## Requirements
 
 - Minecraft 1.21.1
-- NeoForge 21.1.x
+- NeoForge 21.1.200+
 - Create 6
-- Copycats+ 3.0.4
+- Copycats+ 3.0.x (tested with 3.0.9)
 - Java 21
 
-## Installation
-
-Install the requirements and place
-`copycat_roller-1.0.jar` in the `mods` folder on both client and server.
-
-The addon does not modify the Create or Copycats+ JAR files.
+Install the dependencies and place `copycat_roller-1.1.jar` in the `mods`
+folder on both client and server.
 
 ## Configuration
 
-The common config is generated at
-`config/copycat_roller-common.toml`.
-
-- `roundingDirection` — round fractional heights down or up
-- `surfaceOnly` — place only the visible upper Copycat surface
-- `fillDepthBlocks` — downward Copycat depth when surface-only mode is disabled
-- `slopeMaxVerticalError` — skip inaccurate Slope Layer states
-
-Defaults favor a lightweight surface: downward rounding and only the nearest
-upper Copycat cell.
+`config/copycat_roller-common.toml` controls height rounding, surface-only
+paving, central downward depth, and Slope Layer accuracy. The Wide Fill Byte
+reach follows Create's `rollerFillDepth`. Defaults are downward rounding and
+one nearest central block of depth.
 
 ## Building
 
@@ -80,11 +69,5 @@ upper Copycat cell.
 .\gradlew.bat build
 ```
 
-The built JAR is written to `build/libs`.
-
-## Developer Documentation
-
-- [API research](docs/API_RESEARCH.md)
-- [Mixin targets](docs/MIXIN_TARGETS.md)
-- [Build and test report](docs/TEST_REPORT.md)
-- [Known limitations](KNOWN_LIMITATIONS.md)
+Developer notes are in [`docs`](docs), with known limitations in
+[`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md).

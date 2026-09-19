@@ -6,8 +6,8 @@ mapped names from another Minecraft version.
 ## Pinned Sources
 
 - Create 6 artifacts for Minecraft 1.21.1 from the official Create Maven.
-- Copycats+ 3.0.4 for Minecraft 1.21.1: tag `v3.0.4+mc1.21.1`, commit
-  `9f808ac0b437817696c50f2e8b57f590b1196094`, CurseForge file `7251823`.
+- Copycats+ 3.0.9 for Minecraft 1.21.1, official NeoForge artifact
+  `copycats-3.0.9+mc.1.21.1-neoforge.jar` (CurseForge file `8822348`).
 
 ## Create 6
 
@@ -68,6 +68,7 @@ public static ItemStack extract(
 
 // MountedStorageManager
 public CombinedInvWrapper getAllItems();
+public ImmutableMap<BlockPos, MountedItemStorage> getAllItemStorages();
 ```
 
 In this version, `MovementContext` exposes the public fields `world`, `state`,
@@ -98,7 +99,11 @@ Create and third-party Mixins can therefore choose a position-specific block
 and extract it from mounted storage exactly as they normally would. Immediately
 before `Level.setBlockAndUpdate`, the addon compares the mounted inventory with
 a component-sensitive snapshot, identifies the actual extracted `BlockItem`,
-cancels the world replacement, and assigns that material to the Copycat.
+cancels the world replacement, and assigns that material to the Copycat. A
+bottomless handler such as `CreativeCrateMountedStorage` deliberately does not
+change after extraction; when there is no deduction, the addon instead accepts
+the unique mounted `BlockItem` matching the block state that Create already
+planned for that exact position.
 
 For a multistate Copycat, the first extracted item is treated as prepaid.
 The addon simulates and extracts the remaining exact per-part cost before
@@ -132,8 +137,7 @@ or runtime dependency on Randomize Filters.
 
 `RollingMode` is package-private and ordered as `TUNNEL_PAVE`,
 `STRAIGHT_FILL`, `WIDE_FILL`. Placing a mixin class in Create's package causes
-a JPMS split-package error, so ordinal `1` is isolated in `RollerModeGate`. A
-GameTest compares the complete runtime enum order and fails if it changes.
+a JPMS split-package error, so ordinals `1` and `2` are isolated in `RollerModeGate`. A GameTest compares the complete runtime enum order and fails if it changes.
 
 ### Profile Semantics
 
@@ -154,7 +158,7 @@ In the default mode, the physical top surface is calculated as
 `profileY + 1`; only its highest occupied cell is then selected, and the full
 base block is not placed.
 
-## Copycats+ 3.0.4
+## Copycats+ 3.0.9
 
 Verified elements:
 
@@ -276,7 +280,7 @@ Its total cost is `positive_layers + negative_layers`; a full `8 + 8` block
 requires 16 `copycat_half_layer` items. Both half properties officially allow
 `0..8`, although a new nonempty block always contains at least one half.
 
-The JSON recipes inside the Copycats+ 3.0.4 JAR were verified:
+The JSON recipes inside the Copycats+ 3.0.9 JAR were verified:
 
 ```text
 c:ingots/zinc -> 8 × copycats:copycat_layer
@@ -316,3 +320,25 @@ which still have the default material are changed; each such property stores
 and consumes one item. Simulation and exact extraction complete before any
 block entity mutation, and the original material storage is restored if
 post-assignment verification fails.
+
+### Copycat Byte and Wide Fill
+
+Copycats+ 3.0.9 exposes `CCBlocks.COPYCAT_BYTE`. `CopycatByteBlock` stores the
+presence of each of the eight 1/2 x 1/2 x 1/2 octants as Boolean block-state
+properties and creates a multistate Copycat block entity. Its recipe converts
+one `c:ingots/zinc` into eight `copycats:copycat_byte` items.
+
+For zinc `WIDE_FILL`, the addon keeps Create's exact central X/Z track profile
+for ordinary Layer/Half Layer paving on every Roller. Rollers are grouped by
+local Y, facing, and longitudinal coordinate. Only the minimum and maximum
+lateral positions in that row emit Bytes; each is restricted to its outward
+side, while an interior Roller emits none and a single Roller emits both ways.
+The lateral axis comes from the unrounded track tangent. The first side Byte
+keeps the seed height; every later horizontal half-cell lowers the selected
+octant by one vertical half-cell. Maximum reach is
+`2 * ((rollerFillDepth + 1) / 2)` half-cells, the exact maximum radius of
+Create's whole-block Wide Fill. Existing empty Byte blocks are merged by
+state union;
+foreign block entities and user-assigned materials are protected. Payment is
+transactional, and an ingot remainder is inserted as real Byte items before
+any world mutation.
