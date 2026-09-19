@@ -17,13 +17,13 @@ Release verification environment:
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-The final version 1.1 build completed successfully. All 35 unit tests passed
+The final version 1.1 build completed successfully. All 37 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
 loaded Copycat Roller 1.1, Create 6, and Copycats+ 3.0.9, then passed all
-58/58 required GameTests in 1.150 seconds. The server run also verifies that
+58/58 required GameTests in 1.334 seconds. The server run also verifies that
 common code does not load client-only classes.
 
-The final build took 14 seconds; the dedicated GameTest run took 20 seconds.
+The final build took 10 seconds; the dedicated GameTest run took 36 seconds.
 
 ## Version 1.1 coverage
 
@@ -32,12 +32,14 @@ The new unit tests verify:
 - one zinc ingot equals exactly eight Copycat Bytes;
 - existing Byte items are consumed before zinc;
 - exact change conservation and invalid payment inputs;
-- Bytes are emitted only along the local lateral axis, never longitudinally;
+- Bytes follow the continuous normal of the local track tangent, including diagonals;
 - one-sided seeds emit only outward and interior seeds emit no slope;
 - the first side Byte matches the central height;
 - each following outward half-block step lowers the surface by half a block;
 - the reach formula matches Create's Wide Fill radius;
 - adjacent longitudinal track samples merge into one lateral shell;
+- every half-block distance band exists at its own height and a quarter-turn
+  surface remains connected through the half-cell diagonal rasterization;
 - negative coordinates and a half-block track rise are rasterized correctly.
 
 The new GameTests verify:
@@ -62,10 +64,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-1.1.jar` — 137,222 bytes
-  - SHA-256: `8F56C5B0207E6446C289417F8EA4925CD783D14F374C055E901C2D0DCB00CF61`
-- `build/libs/copycat_roller-1.1-sources.jar` — 56,216 bytes
-  - SHA-256: `07460359EA82FFD6499027DAAEB53A7CE93FBB6FD1CB4AE1F0489180BA7B1F4E`
+- `build/libs/copycat_roller-1.1.jar` — 139,057 bytes
+  - SHA-256: `E00674C46315518B9A49AE338DFDAA678082F0A026ECBD7F0924FDBFF6A659B2`
+- `build/libs/copycat_roller-1.1-sources.jar` — 56,631 bytes
+  - SHA-256: `AF08881EEB6CD30B55F95BD15866F3AA2BE672FEB4F099EF949277B8C140346B`
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this

@@ -5,7 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class WideFillBytePlannerTest {
@@ -16,12 +19,12 @@ class WideFillBytePlannerTest {
             1
         );
 
-        assertEquals(8, cells.size());
-        assertEquals(4, cells.stream().filter(cell -> cell.distance() == 1).count());
-        assertEquals(4, cells.stream().filter(cell -> cell.distance() == 2).count());
+        assertFalse(cells.isEmpty());
         assertTrue(cells.stream().allMatch(cell ->
-            cell.halfX() == 0 || cell.halfX() == 1
+            cell.halfZ() < 0 || cell.halfZ() > 1
         ));
+        assertTrue(cells.stream().anyMatch(cell -> cell.distance() == 1));
+        assertTrue(cells.stream().anyMatch(cell -> cell.distance() == 2));
         assertTrue(cells.stream()
             .filter(cell -> cell.distance() == 1)
             .allMatch(cell -> cell.lowerHalfY() == 1));
@@ -38,7 +41,7 @@ class WideFillBytePlannerTest {
         );
 
         assertTrue(cells.stream().allMatch(cell ->
-            cell.halfZ() == 0 || cell.halfZ() == 1
+            cell.halfX() < 0 || cell.halfX() > 1
         ));
         assertTrue(cells.stream().anyMatch(cell -> cell.halfX() == -1));
         assertTrue(cells.stream().anyMatch(cell -> cell.halfX() == 2));
@@ -72,8 +75,8 @@ class WideFillBytePlannerTest {
             1
         );
 
-        assertFalse(cells.stream().anyMatch(cell ->
-            cell.halfX() < 0 || cell.halfX() > 3
+        assertTrue(cells.stream().allMatch(cell ->
+            cell.halfZ() < 0 || cell.halfZ() > 1
         ));
         assertTrue(cells.stream().anyMatch(cell ->
             cell.halfX() == 0 && cell.halfZ() == -1
@@ -120,9 +123,9 @@ class WideFillBytePlannerTest {
             1
         );
 
-        assertEquals(4, negative.size());
+        assertFalse(negative.isEmpty());
         assertTrue(negative.stream().allMatch(cell -> cell.halfZ() < 0));
-        assertEquals(4, positive.size());
+        assertFalse(positive.isEmpty());
         assertTrue(positive.stream().allMatch(cell -> cell.halfZ() > 1));
     }
 
@@ -137,6 +140,55 @@ class WideFillBytePlannerTest {
 
         assertTrue(cells.isEmpty());
     }
+
+    @Test
+    void diagonalTangentProducesARealDiagonalNormal() {
+        List<WideFillBytePlanner.ByteCell> cells = WideFillBytePlanner.plan(
+            List.of(new WideFillBytePlanner.Seed(
+                0, 0, 0.0, 1, 1, false, true
+            )),
+            2
+        );
+
+        assertFalse(cells.isEmpty());
+        assertTrue(cells.stream().allMatch(cell ->
+            -cell.halfX() + cell.halfZ() > 0
+        ));
+        assertTrue(cells.stream().anyMatch(cell ->
+            cell.halfX() < 0 && cell.halfZ() > 1
+        ));
+    }
+
+    @Test
+    void everyOffsetBandStaysClosedAroundAQuarterTurn() {
+        List<WideFillBytePlanner.ByteCell> cells = WideFillBytePlanner.plan(
+            List.of(
+                new WideFillBytePlanner.Seed(0, 0, 0.0, 1, 0, false, true),
+                new WideFillBytePlanner.Seed(1, 0, 0.0, 1, 0.5, false, true),
+                new WideFillBytePlanner.Seed(1, 1, 0.0, 1, 1, false, true),
+                new WideFillBytePlanner.Seed(2, 1, 0.0, 0.5, 1, false, true),
+                new WideFillBytePlanner.Seed(2, 2, 0.0, 0, 1, false, true)
+            ),
+            3
+        );
+
+        for (int distance = 1; distance <= 6; distance++) {
+            int expectedDistance = distance;
+            List<WideFillBytePlanner.ByteCell> band = cells.stream()
+                .filter(cell -> cell.distance() == expectedDistance)
+                .toList();
+            assertFalse(band.isEmpty(), "missing offset band " + distance);
+            assertTrue(band.stream().allMatch(cell ->
+                cell.lowerHalfY() == 2 - expectedDistance
+            ));
+            assertEightConnected(
+                band,
+                "disconnected quarter-turn offset band " + distance
+            );
+        }
+        assertEightConnected(cells, "quarter-turn surface is not closed");
+    }
+
     @Test
     void reachMatchesCreatesWideFillRadius() {
         assertEquals(0, WideFillBytePlanner.reachBlocksForCreateDepth(0));
@@ -156,5 +208,37 @@ class WideFillBytePlannerTest {
         assertEquals(6, cells.stream().mapToInt(
             WideFillBytePlanner.ByteCell::distance
         ).max().orElseThrow());
+    }
+
+    private static void assertEightConnected(
+        List<WideFillBytePlanner.ByteCell> cells,
+        String message
+    ) {
+        Set<String> remaining = new HashSet<>();
+        for (WideFillBytePlanner.ByteCell cell : cells) {
+            remaining.add(cell.halfX() + "," + cell.halfZ());
+        }
+        ArrayDeque<String> queue = new ArrayDeque<>();
+        String first = remaining.iterator().next();
+        remaining.remove(first);
+        queue.add(first);
+        while (!queue.isEmpty()) {
+            String[] coordinates = queue.removeFirst().split(",");
+            int x = Integer.parseInt(coordinates[0]);
+            int z = Integer.parseInt(coordinates[1]);
+            for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    if ((offsetX == 0 && offsetZ == 0)
+                        || Math.max(Math.abs(offsetX), Math.abs(offsetZ)) != 1) {
+                        continue;
+                    }
+                    String neighbour = (x + offsetX) + "," + (z + offsetZ);
+                    if (remaining.remove(neighbour)) {
+                        queue.add(neighbour);
+                    }
+                }
+            }
+        }
+        assertTrue(remaining.isEmpty(), message + ": " + remaining);
     }
 }

@@ -333,9 +333,16 @@ for ordinary Layer/Half Layer paving on every Roller. Rollers are grouped by
 local Y, facing, and longitudinal coordinate. Only the minimum and maximum
 lateral positions in that row emit Bytes; each is restricted to its outward
 side, while an interior Roller emits none and a single Roller emits both ways.
-The lateral axis comes from the unrounded track tangent. The first side Byte
-keeps the seed height; every later horizontal half-cell lowers the selected
-octant by one vertical half-cell. Maximum reach is
+The normalized lateral vector `(-tangentZ, tangentX)` comes directly from the
+unrounded local track tangent. Candidate half-columns are resolved by a nearest
+sample map: Euclidean distance chooses exactly one owner, while the owner's
+normal chooses the permitted outer side. The full distance field is then
+quantized into nested half-cell contours, including diagonal steps on curves.
+This avoids per-sample transverse bars, prevents different distance bands from
+overwriting one another, and keeps the Byte surface outside the exact central
+footprint. The first side Byte keeps the
+seed height; every later horizontal half-cell lowers the selected octant by one
+vertical half-cell. Maximum reach is
 `2 * ((rollerFillDepth + 1) / 2)` half-cells, the exact maximum radius of
 Create's whole-block Wide Fill. Existing empty Byte blocks are merged by
 state union;

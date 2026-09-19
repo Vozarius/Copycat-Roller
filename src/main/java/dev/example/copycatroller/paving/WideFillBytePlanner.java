@@ -8,12 +8,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Rasterizes selected lateral sides of Wide Fill on a half-block grid.
- * The first cell beside the track keeps the track surface height; every
- * following horizontal half-step lowers the surface by one half-block.
+ * Rasterizes selected lateral Wide Fill surfaces on the Copycat Byte grid.
+ * Each output column is owned by its nearest track sample, so curved normals
+ * cannot overlap into the central paving footprint or erase lower bands.
  */
 public final class WideFillBytePlanner {
     private static final double HALF_GRID_EPSILON = 1.0e-7;
+    private static final double SIDE_EPSILON = 1.0e-7;
 
     private WideFillBytePlanner() {
     }
@@ -36,61 +37,79 @@ public final class WideFillBytePlanner {
             throw new IllegalArgumentException("maximumReachBlocks must not be negative");
         }
 
-        Map<HalfColumn, Integer> seedLowerY = new HashMap<>();
-        List<SeedVoxel> seedVoxels = new ArrayList<>();
-        for (Seed seed : seeds) {
-            int lowerHalfY = lowerHalfY(seed.surfaceY());
-            boolean lateralAlongX = Math.abs(seed.tangentZ())
-                > Math.abs(seed.tangentX());
-            for (int localX = 0; localX < 2; localX++) {
-                for (int localZ = 0; localZ < 2; localZ++) {
-                    HalfColumn column = new HalfColumn(
-                        seed.blockX() * 2 + localX,
-                        seed.blockZ() * 2 + localZ
-                    );
-                    seedLowerY.merge(column, lowerHalfY, Math::max);
-                    seedVoxels.add(new SeedVoxel(
-                        column,
-                        lowerHalfY,
-                        lateralAlongX,
-                        seed.allowNegativeLateral(),
-                        seed.allowPositiveLateral()
-                    ));
-                }
-            }
+        List<SourceVoxel> sources = sources(seeds);
+        Set<HalfColumn> footprint = new HashSet<>();
+        for (SourceVoxel source : sources) {
+            footprint.add(source.column());
         }
 
         int maximumHalfSteps = maximumReachBlocks * 2;
-        Map<HalfColumn, ByteCell> result = new HashMap<>();
-        Set<HalfColumn> footprint = Set.copyOf(seedLowerY.keySet());
-        for (SeedVoxel seed : seedVoxels) {
-            for (int sign : new int[] {-1, 1}) {
-                if (sign < 0 && !seed.allowNegativeLateral()
-                    || sign > 0 && !seed.allowPositiveLateral()) {
-                    continue;
-                }
-                for (int step = 1; step <= maximumHalfSteps; step++) {
-                    int halfX = seed.column().x()
-                        + (seed.lateralAlongX() ? sign * step : 0);
-                    int halfZ = seed.column().z()
-                        + (seed.lateralAlongX() ? 0 : sign * step);
-                    HalfColumn column = new HalfColumn(halfX, halfZ);
+        Map<HalfColumn, NearestSource> nearest = new HashMap<>();
+        for (SourceVoxel source : sources) {
+            for (int offsetX = -maximumHalfSteps;
+                 offsetX <= maximumHalfSteps;
+                 offsetX++) {
+                for (int offsetZ = -maximumHalfSteps;
+                     offsetZ <= maximumHalfSteps;
+                     offsetZ++) {
+                    if (offsetX == 0 && offsetZ == 0) {
+                        continue;
+                    }
+
+                    double squaredDistance = offsetX * offsetX
+                        + offsetZ * offsetZ;
+                    int distance = radialDistance(squaredDistance);
+                    if (distance < 1 || distance > maximumHalfSteps) {
+                        continue;
+                    }
+
+                    double side = offsetX * source.normalX()
+                        + offsetZ * source.normalZ();
+                    double along = offsetX * -source.normalZ()
+                        + offsetZ * source.normalX();
+                    double lateralMargin = Math.abs(side) - Math.abs(along);
+
+                    HalfColumn column = new HalfColumn(
+                        source.column().x() + offsetX,
+                        source.column().z() + offsetZ
+                    );
                     if (footprint.contains(column)) {
                         continue;
                     }
 
-                    ByteCell candidate = new ByteCell(
-                        halfX,
-                        seed.lowerHalfY() - step + 1,
-                        halfZ,
-                        step
+                    NearestSource candidate = new NearestSource(
+                        source,
+                        squaredDistance,
+                        lateralMargin,
+                        side,
+                        distance
                     );
-                    result.merge(column, candidate, WideFillBytePlanner::higher);
+                    nearest.merge(
+                        column,
+                        candidate,
+                        WideFillBytePlanner::nearer
+                    );
                 }
             }
         }
 
-        List<ByteCell> ordered = new ArrayList<>(result.values());
+        List<ByteCell> ordered = new ArrayList<>(nearest.size());
+        for (Map.Entry<HalfColumn, NearestSource> entry : nearest.entrySet()) {
+            HalfColumn column = entry.getKey();
+            NearestSource owner = entry.getValue();
+            if (Math.abs(owner.side()) <= SIDE_EPSILON
+                || (owner.side() > 0
+                    ? !owner.source().allowPositiveLateral()
+                    : !owner.source().allowNegativeLateral())) {
+                continue;
+            }
+            ordered.add(new ByteCell(
+                column.x(),
+                owner.source().lowerHalfY() - owner.distance() + 1,
+                column.z(),
+                owner.distance()
+            ));
+        }
         ordered.sort((left, right) -> {
             int comparison = Integer.compare(left.distance(), right.distance());
             if (comparison != 0) return comparison;
@@ -105,34 +124,73 @@ public final class WideFillBytePlanner {
 
     public static List<HalfVoxel> seedVoxels(List<Seed> seeds) {
         Set<HalfVoxel> result = new HashSet<>();
+        for (SourceVoxel source : sources(seeds)) {
+            result.add(new HalfVoxel(
+                source.column().x(),
+                source.lowerHalfY(),
+                source.column().z()
+            ));
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<SourceVoxel> sources(List<Seed> seeds) {
+        List<SourceVoxel> result = new ArrayList<>(seeds.size() * 4);
         for (Seed seed : seeds) {
             int lowerHalfY = lowerHalfY(seed.surfaceY());
+            double length = Math.hypot(seed.tangentX(), seed.tangentZ());
+            double normalX = -seed.tangentZ() / length;
+            double normalZ = seed.tangentX() / length;
             for (int localX = 0; localX < 2; localX++) {
                 for (int localZ = 0; localZ < 2; localZ++) {
-                    result.add(new HalfVoxel(
-                        seed.blockX() * 2 + localX,
+                    result.add(new SourceVoxel(
+                        new HalfColumn(
+                            seed.blockX() * 2 + localX,
+                            seed.blockZ() * 2 + localZ
+                        ),
                         lowerHalfY,
-                        seed.blockZ() * 2 + localZ
+                        normalX,
+                        normalZ,
+                        seed.allowNegativeLateral(),
+                        seed.allowPositiveLateral()
                     ));
                 }
             }
         }
-        return List.copyOf(result);
+        return result;
+    }
+
+    private static NearestSource nearer(
+        NearestSource current,
+        NearestSource candidate
+    ) {
+        if (Math.abs(candidate.squaredDistance() - current.squaredDistance())
+            > HALF_GRID_EPSILON) {
+            return candidate.squaredDistance() < current.squaredDistance()
+                ? candidate
+                : current;
+        }
+        if (Math.abs(candidate.lateralMargin() - current.lateralMargin())
+            > HALF_GRID_EPSILON) {
+            return candidate.lateralMargin() > current.lateralMargin()
+                ? candidate
+                : current;
+        }
+        return candidate.source().lowerHalfY() > current.source().lowerHalfY()
+            ? candidate
+            : current;
+    }
+
+    private static int radialDistance(double squaredDistance) {
+        return (int) Math.floor(
+            Math.sqrt(squaredDistance) + 0.5 + HALF_GRID_EPSILON
+        );
     }
 
     private static int lowerHalfY(double surfaceY) {
         return (int) Math.floor(
             (surfaceY + 1.0) * 2.0 + HALF_GRID_EPSILON
         ) - 1;
-    }
-
-    private static ByteCell higher(ByteCell current, ByteCell candidate) {
-        if (candidate.lowerHalfY() != current.lowerHalfY()) {
-            return candidate.lowerHalfY() > current.lowerHalfY()
-                ? candidate
-                : current;
-        }
-        return candidate.distance() < current.distance() ? candidate : current;
     }
 
     public record Seed(
@@ -194,12 +252,22 @@ public final class WideFillBytePlanner {
     private record HalfColumn(int x, int z) {
     }
 
-    private record SeedVoxel(
+    private record SourceVoxel(
         HalfColumn column,
         int lowerHalfY,
-        boolean lateralAlongX,
+        double normalX,
+        double normalZ,
         boolean allowNegativeLateral,
         boolean allowPositiveLateral
+    ) {
+    }
+
+    private record NearestSource(
+        SourceVoxel source,
+        double squaredDistance,
+        double lateralMargin,
+        double side,
+        int distance
     ) {
     }
 }

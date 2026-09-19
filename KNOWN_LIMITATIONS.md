@@ -98,7 +98,12 @@
     embankment. For a side-by-side row, only its two edge Rollers create Bytes,
     and each edge Roller emits only away from the row. Interior Rollers retain
     normal central Layer/Half Layer paving and emit no Bytes. A single Roller
-    owns both sides. The first side Byte matches the central surface height;
+    owns both sides. Curves use the normalized local tangent captured before
+    Create quantizes the profile. Each output half-column is owned by its one
+    nearest track sample and receives exactly one distance band. The complete
+    field is quantized into nested, diagonal-connected contours while the exact
+    central paving footprint remains excluded. The first side Byte matches the
+    central surface height;
     every following half-block step lowers by one half block. Maximum reach is
     `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill radius.
     A solid obstacle terminates only the affected branch, which prevents

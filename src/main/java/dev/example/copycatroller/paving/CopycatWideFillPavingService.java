@@ -120,18 +120,19 @@ public final class CopycatWideFillPavingService {
         EdgeSides edges,
         Vec3 clockwiseWorld
     ) {
-        boolean lateralAlongX = Math.abs(sample.tangentZ())
-            > Math.abs(sample.tangentX());
-        double clockwiseComponent = lateralAlongX
-            ? clockwiseWorld.x
-            : clockwiseWorld.z;
-        if (Math.abs(clockwiseComponent) < DIRECTION_EPSILON) {
-            clockwiseComponent = lateralAlongX
-                ? sample.tangentZ()
-                : -sample.tangentX();
+        double tangentLength = Math.hypot(
+            sample.tangentX(),
+            sample.tangentZ()
+        );
+        double positiveNormalX = -sample.tangentZ() / tangentLength;
+        double positiveNormalZ = sample.tangentX() / tangentLength;
+        double clockwiseDot = clockwiseWorld.x * positiveNormalX
+            + clockwiseWorld.z * positiveNormalZ;
+        if (Math.abs(clockwiseDot) < DIRECTION_EPSILON) {
+            clockwiseDot = 1;
         }
 
-        boolean positiveIsClockwise = clockwiseComponent > 0;
+        boolean positiveIsClockwise = clockwiseDot > 0;
         boolean allowNegative = positiveIsClockwise
             ? edges.counterClockwiseOuter()
             : edges.clockwiseOuter();
@@ -177,14 +178,17 @@ public final class CopycatWideFillPavingService {
         int parentY = cell.distance() == 1
             ? cell.lowerHalfY()
             : cell.lowerHalfY() + 1;
-        return reached.contains(new HalfVoxel(
-            cell.halfX() - 1, parentY, cell.halfZ()
-        )) || reached.contains(new HalfVoxel(
-            cell.halfX() + 1, parentY, cell.halfZ()
-        )) || reached.contains(new HalfVoxel(
-            cell.halfX(), parentY, cell.halfZ() - 1
-        )) || reached.contains(new HalfVoxel(
-            cell.halfX(), parentY, cell.halfZ() + 1
-        ));
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                if (reached.contains(new HalfVoxel(
+                    cell.halfX() + offsetX,
+                    parentY,
+                    cell.halfZ() + offsetZ
+                ))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }
