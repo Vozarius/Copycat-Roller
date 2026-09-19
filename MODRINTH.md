@@ -24,7 +24,9 @@ In normal **Fill** mode, put a supported Copycat or Zinc Ingot in the Roller
 filter. In **Wide Fill**, every Roller keeps normal central paving. Only the two
 outermost Rollers build Byte slopes, one outward side each, so adjacent Rollers
 do not create overlapping internal slopes. Curves follow the real local track
-tangent and remain connected at every outward height band. The first Byte
+tangent and remain connected at every outward height band. Open profile ends
+are clipped so repeated Roller steps do not create transverse Byte lobes in the
+center, while required lower support cells are preserved. The first Byte
 matches the central height, then every half-block step outward drops by half a
 block. Reach matches Create's normal Wide Fill.
 

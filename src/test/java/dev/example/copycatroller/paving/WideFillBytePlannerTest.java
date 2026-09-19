@@ -23,6 +23,13 @@ class WideFillBytePlannerTest {
         assertTrue(cells.stream().allMatch(cell ->
             cell.halfZ() < 0 || cell.halfZ() > 1
         ));
+        assertTrue(cells.stream().allMatch(cell ->
+            distanceOutside(cell.halfX(), 0, 1)
+                <= distanceOutside(cell.halfZ(), 0, 1)
+        ));
+        assertTrue(cells.stream().allMatch(cell ->
+            cell.halfX() == 0 || cell.halfX() == 1
+        ));
         assertTrue(cells.stream().anyMatch(cell -> cell.distance() == 1));
         assertTrue(cells.stream().anyMatch(cell -> cell.distance() == 2));
         assertTrue(cells.stream()
@@ -42,6 +49,13 @@ class WideFillBytePlannerTest {
 
         assertTrue(cells.stream().allMatch(cell ->
             cell.halfX() < 0 || cell.halfX() > 1
+        ));
+        assertTrue(cells.stream().allMatch(cell ->
+            distanceOutside(cell.halfZ(), 0, 1)
+                <= distanceOutside(cell.halfX(), 0, 1)
+        ));
+        assertTrue(cells.stream().allMatch(cell ->
+            cell.halfZ() == 0 || cell.halfZ() == 1
         ));
         assertTrue(cells.stream().anyMatch(cell -> cell.halfX() == -1));
         assertTrue(cells.stream().anyMatch(cell -> cell.halfX() == 2));
@@ -77,6 +91,9 @@ class WideFillBytePlannerTest {
 
         assertTrue(cells.stream().allMatch(cell ->
             cell.halfZ() < 0 || cell.halfZ() > 1
+        ));
+        assertTrue(cells.stream().allMatch(cell ->
+            cell.halfX() >= 0 && cell.halfX() <= 3
         ));
         assertTrue(cells.stream().anyMatch(cell ->
             cell.halfX() == 0 && cell.halfZ() == -1
@@ -123,9 +140,9 @@ class WideFillBytePlannerTest {
             1
         );
 
-        assertFalse(negative.isEmpty());
+        assertEquals(4, negative.size());
         assertTrue(negative.stream().allMatch(cell -> cell.halfZ() < 0));
-        assertFalse(positive.isEmpty());
+        assertEquals(4, positive.size());
         assertTrue(positive.stream().allMatch(cell -> cell.halfZ() > 1));
     }
 
@@ -161,16 +178,15 @@ class WideFillBytePlannerTest {
 
     @Test
     void everyOffsetBandStaysClosedAroundAQuarterTurn() {
-        List<WideFillBytePlanner.ByteCell> cells = WideFillBytePlanner.plan(
-            List.of(
-                new WideFillBytePlanner.Seed(0, 0, 0.0, 1, 0, false, true),
-                new WideFillBytePlanner.Seed(1, 0, 0.0, 1, 0.5, false, true),
-                new WideFillBytePlanner.Seed(1, 1, 0.0, 1, 1, false, true),
-                new WideFillBytePlanner.Seed(2, 1, 0.0, 0.5, 1, false, true),
-                new WideFillBytePlanner.Seed(2, 2, 0.0, 0, 1, false, true)
-            ),
-            3
+        List<WideFillBytePlanner.Seed> seeds = List.of(
+            new WideFillBytePlanner.Seed(0, 0, 0.0, 1, 0, false, true),
+            new WideFillBytePlanner.Seed(1, 0, 0.0, 1, 0.5, false, true),
+            new WideFillBytePlanner.Seed(1, 1, 0.0, 1, 1, false, true),
+            new WideFillBytePlanner.Seed(2, 1, 0.0, 0.5, 1, false, true),
+            new WideFillBytePlanner.Seed(2, 2, 0.0, 0, 1, false, true)
         );
+        List<WideFillBytePlanner.ByteCell> cells =
+            WideFillBytePlanner.plan(seeds, 3);
 
         for (int distance = 1; distance <= 6; distance++) {
             int expectedDistance = distance;
@@ -187,6 +203,7 @@ class WideFillBytePlannerTest {
             );
         }
         assertEightConnected(cells, "quarter-turn surface is not closed");
+        assertEveryCellHasReachableParent(seeds, cells);
     }
 
     @Test
@@ -208,6 +225,42 @@ class WideFillBytePlannerTest {
         assertEquals(6, cells.stream().mapToInt(
             WideFillBytePlanner.ByteCell::distance
         ).max().orElseThrow());
+    }
+
+    private static int distanceOutside(int value, int minimum, int maximum) {
+        if (value < minimum) {
+            return minimum - value;
+        }
+        return Math.max(0, value - maximum);
+    }
+
+    private static void assertEveryCellHasReachableParent(
+        List<WideFillBytePlanner.Seed> seeds,
+        List<WideFillBytePlanner.ByteCell> cells
+    ) {
+        Set<WideFillBytePlanner.HalfVoxel> reached = new HashSet<>(
+            WideFillBytePlanner.seedVoxels(seeds)
+        );
+        for (WideFillBytePlanner.ByteCell cell : cells) {
+            int parentY = cell.distance() == 1
+                ? cell.lowerHalfY()
+                : cell.lowerHalfY() + 1;
+            boolean parentFound = false;
+            for (int offsetX = -1; offsetX <= 1 && !parentFound; offsetX++) {
+                for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    if (reached.contains(new WideFillBytePlanner.HalfVoxel(
+                        cell.halfX() + offsetX,
+                        parentY,
+                        cell.halfZ() + offsetZ
+                    ))) {
+                        parentFound = true;
+                        break;
+                    }
+                }
+            }
+            assertTrue(parentFound, "unreachable planned cell " + cell);
+            reached.add(cell.voxel());
+        }
     }
 
     private static void assertEightConnected(

@@ -23,9 +23,12 @@ In **Wide Fill** (`WIDE_FILL`) mode, a Zinc Ingot keeps normal central paving
 under every Roller. Only the two outermost Rollers in each side-by-side row
 build Byte slopes, and each one builds only outward. This prevents overlapping
 internal slopes. On curves, each half-cell is assigned to one nearest track
-sample and follows its continuous local normal. This keeps the surface joined,
-prevents different height bands from overwriting one another, and prevents the
-Byte slope from entering the central paving footprint. The first side Byte
+sample and follows its continuous local normal. The complete distance contour
+is kept along the interior of the sampled path; only cells extending beyond
+either open end of Create's short profile are clipped. Minimal support cells are
+restored when a lower band needs them. This keeps every distance band joined
+without creating repeated transverse lobes in the central paving footprint.
+The first side Byte
 matches the height under the edge Roller; every following half-block step drops
 by half a block. Reach matches Create's normal Wide Fill radius, and obstacles
 stop only the affected branch.

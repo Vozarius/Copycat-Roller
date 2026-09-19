@@ -101,10 +101,14 @@
     owns both sides. Curves use the normalized local tangent captured before
     Create quantizes the profile. Each output half-column is owned by its one
     nearest track sample and receives exactly one distance band. The complete
-    field is quantized into nested, diagonal-connected contours while the exact
-    central paving footprint remains excluded. The first side Byte matches the
-    central surface height;
-    every following half-block step lowers by one half block. Maximum reach is
+    field is quantized into nested, diagonal-connected contours. Only cells
+    extending past either open longitudinal end of Create's short sampled
+    profile are rejected; interior contour cells are retained. Minimal support
+    chains can restore a clipped cell in a lower band when a visible outer cell
+    would otherwise be unreachable. This prevents repeated end lobes from
+    entering the central paving area without splitting curved bands. The first
+    side Byte matches the central surface height; every
+    following half-block step lowers by one half block. Maximum reach is
     `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill radius.
     A solid obstacle terminates only the affected branch, which prevents
     placement through walls but can leave an intentional opening.

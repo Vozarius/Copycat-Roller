@@ -338,9 +338,15 @@ unrounded local track tangent. Candidate half-columns are resolved by a nearest
 sample map: Euclidean distance chooses exactly one owner, while the owner's
 normal chooses the permitted outer side. The full distance field is then
 quantized into nested half-cell contours, including diagonal steps on curves.
-This avoids per-sample transverse bars, prevents different distance bands from
-overwriting one another, and keeps the Byte surface outside the exact central
-footprint. The first side Byte keeps the
+After ownership is resolved, the planner detects whether the owning half-cell
+has nearby longitudinal support in each direction. A candidate is clipped only
+when its along-track projection exceeds 0.75 half-cells toward an unsupported
+open end. Interior sources retain the complete distance contour. If a retained
+cell lacks a reachable cell in the previous height band, the planner restores
+the smallest recursive support chain from the side-valid field. This removes
+repeated short-profile end lobes without returning to per-sample rays, prevents
+different distance bands from overwriting one another, and keeps the central
+paving area available. The first side Byte keeps the
 seed height; every later horizontal half-cell lowers the selected octant by one
 vertical half-cell. Maximum reach is
 `2 * ((rollerFillDepth + 1) / 2)` half-cells, the exact maximum radius of

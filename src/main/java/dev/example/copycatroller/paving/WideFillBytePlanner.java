@@ -1,6 +1,7 @@
 package dev.example.copycatroller.paving;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -9,8 +10,9 @@ import java.util.Set;
 
 /**
  * Rasterizes selected lateral Wide Fill surfaces on the Copycat Byte grid.
- * Each output column is owned by its nearest track sample, so curved normals
- * cannot overlap into the central paving footprint or erase lower bands.
+ * Each output column is owned by its nearest track sample. Interior distance
+ * contours remain continuous while unsupported ends of Create's short paving
+ * profile are clipped before they can form transverse lobes.
  */
 public final class WideFillBytePlanner {
     private static final double HALF_GRID_EPSILON = 1.0e-7;
@@ -82,6 +84,7 @@ public final class WideFillBytePlanner {
                         squaredDistance,
                         lateralMargin,
                         side,
+                        along,
                         distance
                     );
                     nearest.merge(
@@ -93,9 +96,9 @@ public final class WideFillBytePlanner {
             }
         }
 
-        List<ByteCell> ordered = new ArrayList<>(nearest.size());
+        Map<HalfColumn, NearestSource> allowed = new HashMap<>();
+        Map<HalfColumn, NearestSource> selected = new HashMap<>();
         for (Map.Entry<HalfColumn, NearestSource> entry : nearest.entrySet()) {
-            HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
             if (Math.abs(owner.side()) <= SIDE_EPSILON
                 || (owner.side() > 0
@@ -103,9 +106,36 @@ public final class WideFillBytePlanner {
                     : !owner.source().allowNegativeLateral())) {
                 continue;
             }
+            allowed.put(entry.getKey(), owner);
+            if (!extendsPastOpenEnd(owner, sources)) {
+                selected.put(entry.getKey(), owner);
+            }
+        }
+
+        List<Map.Entry<HalfColumn, NearestSource>> initial =
+            new ArrayList<>(selected.entrySet());
+        initial.sort(Comparator.comparingInt(
+            entry -> entry.getValue().distance()
+        ));
+        for (Map.Entry<HalfColumn, NearestSource> entry : initial) {
+            if (!ensureSupported(
+                entry.getKey(),
+                entry.getValue(),
+                selected,
+                allowed,
+                sources
+            )) {
+                selected.remove(entry.getKey());
+            }
+        }
+
+        List<ByteCell> ordered = new ArrayList<>(selected.size());
+        for (Map.Entry<HalfColumn, NearestSource> entry : selected.entrySet()) {
+            HalfColumn column = entry.getKey();
+            NearestSource owner = entry.getValue();
             ordered.add(new ByteCell(
                 column.x(),
-                owner.source().lowerHalfY() - owner.distance() + 1,
+                outputLowerHalfY(owner),
                 column.z(),
                 owner.distance()
             ));
@@ -120,6 +150,139 @@ public final class WideFillBytePlanner {
             return Integer.compare(left.lowerHalfY(), right.lowerHalfY());
         });
         return List.copyOf(ordered);
+    }
+
+    private static boolean ensureSupported(
+        HalfColumn column,
+        NearestSource owner,
+        Map<HalfColumn, NearestSource> selected,
+        Map<HalfColumn, NearestSource> allowed,
+        List<SourceVoxel> sources
+    ) {
+        if (owner.distance() == 1) {
+            return true;
+        }
+
+        int requiredY = outputLowerHalfY(owner) + 1;
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                NearestSource parent = selected.get(new HalfColumn(
+                    column.x() + offsetX,
+                    column.z() + offsetZ
+                ));
+                if (isParent(parent, owner.distance() - 1, requiredY)) {
+                    return true;
+                }
+            }
+        }
+
+        HalfColumn bestColumn = null;
+        NearestSource best = null;
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                HalfColumn candidateColumn = new HalfColumn(
+                    column.x() + offsetX,
+                    column.z() + offsetZ
+                );
+                NearestSource candidate = allowed.get(candidateColumn);
+                if (!isParent(candidate, owner.distance() - 1, requiredY)
+                    || !betterSupport(candidate, best, sources)) {
+                    continue;
+                }
+                bestColumn = candidateColumn;
+                best = candidate;
+            }
+        }
+        if (best == null
+            || !ensureSupported(
+                bestColumn,
+                best,
+                selected,
+                allowed,
+                sources
+            )) {
+            return false;
+        }
+        selected.put(bestColumn, best);
+        return true;
+    }
+
+    private static boolean isParent(
+        NearestSource candidate,
+        int distance,
+        int lowerHalfY
+    ) {
+        return candidate != null
+            && candidate.distance() == distance
+            && outputLowerHalfY(candidate) == lowerHalfY;
+    }
+
+    private static boolean betterSupport(
+        NearestSource candidate,
+        NearestSource current,
+        List<SourceVoxel> sources
+    ) {
+        if (current == null) {
+            return true;
+        }
+        boolean candidateClipped = extendsPastOpenEnd(candidate, sources);
+        boolean currentClipped = extendsPastOpenEnd(current, sources);
+        if (candidateClipped != currentClipped) {
+            return !candidateClipped;
+        }
+        if (Math.abs(
+            candidate.lateralMargin() - current.lateralMargin()
+        ) > HALF_GRID_EPSILON) {
+            return candidate.lateralMargin() > current.lateralMargin();
+        }
+        return candidate.squaredDistance() < current.squaredDistance();
+    }
+
+    private static int outputLowerHalfY(NearestSource owner) {
+        return owner.source().lowerHalfY() - owner.distance() + 1;
+    }
+
+    private static boolean extendsPastOpenEnd(
+        NearestSource owner,
+        List<SourceVoxel> sources
+    ) {
+        // A PaveTask contains only a short moving window. Clip its unsupported
+        // caps, not the interior distance contour, or curves become separate
+        // rays emitted by every sampled track cell.
+        if (Math.abs(owner.along()) <= 0.75 + HALF_GRID_EPSILON) {
+            return false;
+        }
+        return !hasLongitudinalSupport(
+            owner.source(),
+            sources,
+            Math.signum(owner.along())
+        );
+    }
+
+    private static boolean hasLongitudinalSupport(
+        SourceVoxel source,
+        List<SourceVoxel> sources,
+        double direction
+    ) {
+        for (SourceVoxel candidate : sources) {
+            if (candidate.column().equals(source.column())) {
+                continue;
+            }
+            int offsetX = candidate.column().x() - source.column().x();
+            int offsetZ = candidate.column().z() - source.column().z();
+            double along = (
+                offsetX * -source.normalZ()
+                    + offsetZ * source.normalX()
+            ) * direction;
+            double side = offsetX * source.normalX()
+                + offsetZ * source.normalZ();
+            if (along > 0.5 - HALF_GRID_EPSILON
+                && along <= 2.5 + HALF_GRID_EPSILON
+                && Math.abs(side) <= 1.5 + HALF_GRID_EPSILON) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static List<HalfVoxel> seedVoxels(List<Seed> seeds) {
@@ -267,6 +430,7 @@ public final class WideFillBytePlanner {
         double squaredDistance,
         double lateralMargin,
         double side,
+        double along,
         int distance
     ) {
     }
