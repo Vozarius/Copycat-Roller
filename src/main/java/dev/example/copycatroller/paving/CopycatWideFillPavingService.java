@@ -1,5 +1,6 @@
 package dev.example.copycatroller.paving;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -21,8 +22,9 @@ import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Zinc-only Wide Fill compatibility. Only the two edge Rollers in a lateral
- * row create a one-Byte-thick slope, and each edge Roller works outward only.
+ * Zinc-only Wide Fill compatibility. Every enabled Wide Fill Roller in the
+ * lateral row contributes its exact track footprint to the protected central
+ * mask. Only the two edge Rollers emit a one-Byte-thick slope, outward only.
  */
 public final class CopycatWideFillPavingService {
     private static final double DIRECTION_EPSILON = 1.0e-7;
@@ -33,45 +35,133 @@ public final class CopycatWideFillPavingService {
     public static boolean pave(
         MovementContext context,
         BlockPos fallbackPosition,
-        @Nullable PaveTask trackProfile
+        @Nullable PaveTask trackProfile,
+        TrackProfileProvider profileProvider
     ) {
         if (context.world.isClientSide || context.contraption == null) {
             return false;
         }
 
         Direction localFacing = context.state.getValue(RollerBlock.FACING);
-        List<BlockPos> matchingRollers = context.contraption.getBlocks()
-            .entrySet()
-            .stream()
-            .filter(entry -> entry.getValue().state().getBlock() instanceof RollerBlock)
-            .filter(entry -> entry.getValue().state().getValue(RollerBlock.FACING) == localFacing)
-            .map(java.util.Map.Entry::getKey)
+        // Build the complete row footprint synchronously. No MovementContext,
+        // Level, or contraption reference escapes this invocation.
+        List<MovementContext> rowRollers = new ArrayList<>(
+            context.contraption.getActors().stream()
+                .map(pair -> pair.getRight())
+                .filter(actor -> actor.state.getBlock() instanceof RollerBlock)
+                .filter(actor -> !actor.disabled)
+                .filter(actor ->
+                    actor.state.getValue(RollerBlock.FACING) == localFacing
+                )
+                .filter(actor ->
+                    RollerModeGate.isWideFill(actor.blockEntityData)
+                )
+                .filter(actor -> sameRow(context, actor, localFacing))
+                .toList()
+        );
+        if (rowRollers.stream().noneMatch(actor -> actor == context)) {
+            rowRollers.add(context);
+        }
+        List<BlockPos> rowPositions = rowRollers.stream()
+            .map(actor -> actor.localPos)
             .toList();
         EdgeSides edges = RollerEdgeSelection.select(
             context.localPos,
             localFacing,
-            matchingRollers
+            rowPositions
         );
         if (!edges.hasOuterSide()) {
             return false;
         }
 
-        List<TrackSurfaceSample> samples = trackProfile == null
-            ? List.of(fallbackSample(context, fallbackPosition))
-            : PreciseTrackHeightSampler.samples(
-                trackProfile,
-                context.localPos.getY()
-            );
-        if (samples.isEmpty()) {
-            return false;
+        Direction clockwise = localFacing.getClockWise();
+        List<RollerProfile> profiles = new ArrayList<>();
+        for (MovementContext roller : rowRollers) {
+            PaveTask profile = roller == context
+                ? trackProfile
+                : profileProvider.create(roller);
+            List<TrackSurfaceSample> samples;
+            if (profile != null) {
+                samples = PreciseTrackHeightSampler.samples(
+                    profile,
+                    roller.localPos.getY()
+                );
+            } else if (roller == context) {
+                samples = List.of(fallbackSample(context, fallbackPosition));
+            } else {
+                continue;
+            }
+            if (!samples.isEmpty()) {
+                profiles.add(new RollerProfile(
+                    roller == context,
+                    projection(roller.localPos, clockwise),
+                    samples
+                ));
+            }
         }
 
-        Vec3 clockwiseWorld = context.rotation.apply(
-            Vec3.atLowerCornerOf(localFacing.getClockWise().getNormal())
+        RollerProfile currentProfile = profiles.stream()
+            .filter(RollerProfile::current)
+            .findFirst()
+            .orElse(null);
+        if (currentProfile == null) {
+            return false;
+        }
+        RollerProfile inwardProfile = inwardProfile(
+            currentProfile,
+            profiles,
+            edges
         );
-        List<Seed> seeds = samples.stream()
-            .map(sample -> seedFor(sample, edges, clockwiseWorld))
-            .toList();
+        List<Seed> seeds = new ArrayList<>();
+        for (RollerProfile profile : profiles) {
+            for (TrackSurfaceSample sample : profile.samples()) {
+                if (!profile.current()) {
+                    seeds.add(new Seed(
+                        sample.x(),
+                        sample.z(),
+                        sample.minimumCellSurfaceY(),
+                        sample.tangentX(),
+                        sample.tangentZ(),
+                        false,
+                        false
+                    ));
+                } else if (edges.counterClockwiseOuter()
+                    && edges.clockwiseOuter()) {
+                    seeds.add(new Seed(
+                        sample.x(),
+                        sample.z(),
+                        sample.minimumCellSurfaceY(),
+                        sample.tangentX(),
+                        sample.tangentZ()
+                    ));
+                } else if (inwardProfile != null) {
+                    seeds.add(stableOutwardSeed(sample, inwardProfile.samples()));
+                } else if (trackProfile == null) {
+                    // Non-track contraptions have no neighbouring PaveTask from
+                    // which a stable world side can be reconstructed.
+                    Vec3 fallbackClockwiseWorld = context.rotation.apply(
+                        Vec3.atLowerCornerOf(clockwise.getNormal())
+                    );
+                    seeds.add(seedFor(sample, edges, fallbackClockwiseWorld));
+                } else {
+                    // Never guess a train side from carriage yaw. If the
+                    // neighbouring profile is unavailable, skipping this
+                    // sample is safer than creating a second-radius slope.
+                    seeds.add(new Seed(
+                        sample.x(),
+                        sample.z(),
+                        sample.minimumCellSurfaceY(),
+                        sample.tangentX(),
+                        sample.tangentZ(),
+                        false,
+                        false
+                    ));
+                }
+            }
+        }
+        if (seeds.isEmpty()) {
+            return false;
+        }
         int reach = WideFillBytePlanner.reachBlocksForCreateDepth(
             AllConfigs.server().kinetics.rollerFillDepth.get()
         );
@@ -113,6 +203,81 @@ public final class CopycatWideFillPavingService {
             changed |= result == PlacementResult.SUCCESS;
         }
         return changed;
+    }
+
+    private static boolean sameRow(
+        MovementContext reference,
+        MovementContext candidate,
+        Direction facing
+    ) {
+        return candidate.localPos.getY() == reference.localPos.getY()
+            && projection(candidate.localPos, facing)
+                == projection(reference.localPos, facing);
+    }
+
+    private static int projection(BlockPos position, Direction direction) {
+        return position.getX() * direction.getStepX()
+            + position.getZ() * direction.getStepZ();
+    }
+
+    private static RollerProfile inwardProfile(
+        RollerProfile current,
+        List<RollerProfile> profiles,
+        EdgeSides edges
+    ) {
+        RollerProfile nearest = null;
+        int nearestDistance = Integer.MAX_VALUE;
+        for (RollerProfile candidate : profiles) {
+            if (candidate.current()) {
+                continue;
+            }
+            int delta = candidate.localLateral() - current.localLateral();
+            boolean isInward = edges.counterClockwiseOuter()
+                ? delta > 0
+                : delta < 0;
+            if (!isInward || Math.abs(delta) >= nearestDistance) {
+                continue;
+            }
+            nearest = candidate;
+            nearestDistance = Math.abs(delta);
+        }
+        return nearest;
+    }
+
+    private static Seed stableOutwardSeed(
+        TrackSurfaceSample edge,
+        List<TrackSurfaceSample> inwardSamples
+    ) {
+        var outward = TrackProfileSideResolver.outwardNormal(
+            edge,
+            inwardSamples
+        );
+        if (outward.isEmpty()) {
+            // Quantized adjacent profiles can occasionally occupy the same
+            // X/Z cell. Suppress this ambiguous sample instead of guessing a
+            // side and creating a second-radius branch.
+            return new Seed(
+                edge.x(),
+                edge.z(),
+                edge.minimumCellSurfaceY(),
+                edge.tangentX(),
+                edge.tangentZ(),
+                false,
+                false
+            );
+        }
+        var normal = outward.orElseThrow();
+        return new Seed(
+            edge.x(),
+            edge.z(),
+            edge.minimumCellSurfaceY(),
+            edge.tangentX(),
+            edge.tangentZ(),
+            normal.x(),
+            normal.z(),
+            false,
+            true
+        );
     }
 
     private static Seed seedFor(
@@ -190,5 +355,17 @@ public final class CopycatWideFillPavingService {
             }
         }
         return false;
+    }
+
+    private record RollerProfile(
+        boolean current,
+        int localLateral,
+        List<TrackSurfaceSample> samples
+    ) {
+    }
+    @FunctionalInterface
+    public interface TrackProfileProvider {
+        @Nullable
+        PaveTask create(MovementContext context);
     }
 }

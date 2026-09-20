@@ -20,18 +20,20 @@ Zinc Ingot to build the Copycat surface. A Zinc Ingot automatically chooses
 between Layer and Half Layer.
 
 In **Wide Fill** (`WIDE_FILL`) mode, a Zinc Ingot keeps normal central paving
-under every Roller. Only the two outermost Rollers in each side-by-side row
-build Byte slopes, and each one builds only outward. This prevents overlapping
-internal slopes. On curves, each half-cell is assigned to one nearest track
-sample and follows its continuous local normal. The complete distance contour
-is kept along the interior of the sampled path; only cells extending beyond
-either open end of Create's short profile are clipped. Minimal support cells are
-restored when a lower band needs them. This keeps every distance band joined
-without creating repeated transverse lobes in the central paving footprint.
-The first side Byte
-matches the height under the edge Roller; every following half-block step drops
-by half a block. Reach matches Create's normal Wide Fill radius, and obstacles
-stop only the affected branch.
+under every Roller. Before creating the side slope, the addon combines the
+exact track profiles of every enabled Wide Fill Roller in the same row into one
+protected central mask. Copycat Bytes can never occupy that mask. Only the two
+outermost Rollers emit Bytes, one outward side each. Curves follow the local
+track tangent as connected distance contours; unsupported ends of Create's
+short profile are clipped and minimal support cells are restored when needed.
+The outward side is derived from the edge Roller and its nearest inward
+neighbour in world space, so carriage rotation on a curve cannot build the
+same slope again at another radius.
+The profiles are read synchronously for the current operation and are never
+cached with the world or contraption. The first side Byte matches the height
+under the edge Roller; every following half-block step drops by half a block.
+Reach matches Create's normal Wide Fill radius, and obstacles stop only the
+affected branch.
 
 An ordinary block filter fills empty parts of existing Copycats with that
 material and still paves non-Copycat positions through Create. Compatible

@@ -77,7 +77,8 @@ public abstract class RollerMovementBehaviourMixin {
             paved |= CopycatWideFillPavingService.pave(
                 context,
                 position,
-                trackProfile
+                trackProfile,
+                this::createHeightProfileForTracks
             );
             if (paved) {
                 copycatRoller$markPaved(context, position);

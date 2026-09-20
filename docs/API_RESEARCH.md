@@ -330,28 +330,42 @@ one `c:ingots/zinc` into eight `copycats:copycat_byte` items.
 
 For zinc `WIDE_FILL`, the addon keeps Create's exact central X/Z track profile
 for ordinary Layer/Half Layer paving on every Roller. Rollers are grouped by
-local Y, facing, and longitudinal coordinate. Only the minimum and maximum
-lateral positions in that row emit Bytes; each is restricted to its outward
-side, while an interior Roller emits none and a single Roller emits both ways.
-The normalized lateral vector `(-tangentZ, tangentX)` comes directly from the
-unrounded local track tangent. Candidate half-columns are resolved by a nearest
-sample map: Euclidean distance chooses exactly one owner, while the owner's
-normal chooses the permitted outer side. The full distance field is then
-quantized into nested half-cell contours, including diagonal steps on curves.
-After ownership is resolved, the planner detects whether the owning half-cell
-has nearby longitudinal support in each direction. A candidate is clipped only
-when its along-track projection exceeds 0.75 half-cells toward an unsupported
-open end. Interior sources retain the complete distance contour. If a retained
-cell lacks a reachable cell in the previous height band, the planner restores
-the smallest recursive support chain from the side-valid field. This removes
-repeated short-profile end lobes without returning to per-sample rays, prevents
-different distance bands from overwriting one another, and keeps the central
-paving area available. The first side Byte keeps the
-seed height; every later horizontal half-cell lowers the selected octant by one
-vertical half-cell. Maximum reach is
-`2 * ((rollerFillDepth + 1) / 2)` half-cells, the exact maximum radius of
-Create's whole-block Wide Fill. Existing empty Byte blocks are merged by
-state union;
-foreign block entities and user-assigned materials are protected. Payment is
+local Y, facing, and longitudinal coordinate. The Mixin passes a scoped
+`TrackProfileProvider` to the service. During that call, the service enumerates
+Create's public `Contraption.getActors()` list, filters it to enabled Wide Fill
+Rollers in the same row, reuses the caller's `PaveTask`, and synchronously asks
+Create for each neighbour's task. It does not modify `tickActors`, delay work,
+or retain any `MovementContext`, `Level`, entity, or contraption reference.
+
+Every sampled block from every row task becomes a non-emitting source, so the
+union of their 2x2 half-cell footprints is the exact protected central mask.
+Only samples belonging to the currently executing edge Roller receive an
+outward emission flag. The opposite edge performs the symmetric operation in
+its own normal Create actor call; an interior Roller returns before planning a
+slope. Thus no Byte candidate can be accepted in a cell reserved by any Roller,
+including the cells directly under the two edges.
+
+For each edge sample, the service finds the nearest laterally valid sample from
+the closest inward Roller's profile. The vector from that inner sample to the
+edge sample selects the sign of the normalized track normal
+`(-tangentZ, tangentX)`. The normal therefore remains smooth, but its world side
+comes from the two track profiles rather than the carriage's instantaneous yaw.
+Overlapping quantized samples with no lateral evidence are non-emitting instead
+of guessing a side. This prevents a turning train from paving the same slope at
+two different radii without retaining cross-tick state.
+
+Candidate half-columns are resolved by a nearest-sample distance field over the
+complete mask: Euclidean distance chooses one owner, while the owner's emission
+flag and explicit world normal choose the permitted outer side.
+The field is quantized into nested half-cell contours, including diagonal steps
+on curves. A candidate is clipped only when its along-track projection exceeds
+0.75 half-cells toward an unsupported open end. If a retained cell lacks a
+reachable predecessor in the previous height band, the planner restores the
+smallest recursive support chain from the side-valid field. The first side
+Byte keeps the seed height; every later half-cell lowers the selected octant by
+one vertical half-cell. Maximum reach is
+`2 * ((rollerFillDepth + 1) / 2)` half-cells, matching Create's whole-block
+Wide Fill radius. Existing empty Byte blocks are merged by state union; foreign
+block entities and user-assigned materials are protected. Payment is
 transactional, and an ingot remainder is inserted as real Byte items before
 any world mutation.

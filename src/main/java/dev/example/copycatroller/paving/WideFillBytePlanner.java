@@ -301,9 +301,9 @@ public final class WideFillBytePlanner {
         List<SourceVoxel> result = new ArrayList<>(seeds.size() * 4);
         for (Seed seed : seeds) {
             int lowerHalfY = lowerHalfY(seed.surfaceY());
-            double length = Math.hypot(seed.tangentX(), seed.tangentZ());
-            double normalX = -seed.tangentZ() / length;
-            double normalZ = seed.tangentX() / length;
+            double normalLength = Math.hypot(seed.normalX(), seed.normalZ());
+            double normalX = seed.normalX() / normalLength;
+            double normalZ = seed.normalZ() / normalLength;
             for (int localX = 0; localX < 2; localX++) {
                 for (int localZ = 0; localZ < 2; localZ++) {
                     result.add(new SourceVoxel(
@@ -362,9 +362,33 @@ public final class WideFillBytePlanner {
         double surfaceY,
         double tangentX,
         double tangentZ,
+        double normalX,
+        double normalZ,
         boolean allowNegativeLateral,
         boolean allowPositiveLateral
     ) {
+        public Seed(
+            int blockX,
+            int blockZ,
+            double surfaceY,
+            double tangentX,
+            double tangentZ,
+            boolean allowNegativeLateral,
+            boolean allowPositiveLateral
+        ) {
+            this(
+                blockX,
+                blockZ,
+                surfaceY,
+                tangentX,
+                tangentZ,
+                -tangentZ,
+                tangentX,
+                allowNegativeLateral,
+                allowPositiveLateral
+            );
+        }
+
         public Seed(
             int blockX,
             int blockZ,
@@ -382,12 +406,18 @@ public final class WideFillBytePlanner {
         public Seed {
             if (!Double.isFinite(surfaceY)
                 || !Double.isFinite(tangentX)
-                || !Double.isFinite(tangentZ)) {
+                || !Double.isFinite(tangentZ)
+                || !Double.isFinite(normalX)
+                || !Double.isFinite(normalZ)) {
                 throw new IllegalArgumentException("seed values must be finite");
             }
             if (Math.abs(tangentX) < 1.0e-9
                 && Math.abs(tangentZ) < 1.0e-9) {
                 throw new IllegalArgumentException("horizontal tangent must not be zero");
+            }
+            if (Math.abs(normalX) < 1.0e-9
+                && Math.abs(normalZ) < 1.0e-9) {
+                throw new IllegalArgumentException("horizontal normal must not be zero");
             }
         }
     }

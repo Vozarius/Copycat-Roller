@@ -95,19 +95,23 @@
     `BlockItem` cannot be inferred safely and needs a dedicated integration.
 
 16. Zinc Wide Fill creates two outer lateral surface strips, not a solid
-    embankment. For a side-by-side row, only its two edge Rollers create Bytes,
-    and each edge Roller emits only away from the row. Interior Rollers retain
-    normal central Layer/Half Layer paving and emit no Bytes. A single Roller
-    owns both sides. Curves use the normalized local tangent captured before
-    Create quantizes the profile. Each output half-column is owned by its one
-    nearest track sample and receives exactly one distance band. The complete
-    field is quantized into nested, diagonal-connected contours. Only cells
-    extending past either open longitudinal end of Create's short sampled
-    profile are rejected; interior contour cells are retained. Minimal support
-    chains can restore a clipped cell in a lower band when a visible outer cell
-    would otherwise be unreachable. This prevents repeated end lobes from
-    entering the central paving area without splitting curved bands. The first
-    side Byte matches the central surface height; every
+    embankment. Every enabled Wide Fill Roller with the same local Y, facing,
+    and longitudinal row contributes its exact `PaveTask` profile to one
+    protected central mask. This includes the cells directly under both edge
+    Rollers. Only the two edge Rollers emit Bytes, and each emits away from the
+    row; interior Rollers emit none. A single Roller owns both sides. Profiles
+    are gathered synchronously from `Contraption.getActors()` and no context,
+    level, entity, or contraption reference is retained after the call. For
+    each edge sample, the closest inward Roller profile selects the sign of the
+    smooth track normal in world space; carriage yaw is never used for a train
+    side. An ambiguous sample with no lateral separation is skipped instead of
+    guessing, so a turn cannot create a second slope radius. Curves use the
+    normalized local tangent captured before Create quantizes the profile.
+    Each output half-column is owned by its nearest track sample and
+    receives one distance band. The field is quantized into nested,
+    diagonal-connected contours. Cells past an unsupported longitudinal end
+    are rejected, while minimal support chains keep visible outer bands
+    reachable. The first side Byte matches the central surface height; every
     following half-block step lowers by one half block. Maximum reach is
     `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill radius.
     A solid obstacle terminates only the affected branch, which prevents

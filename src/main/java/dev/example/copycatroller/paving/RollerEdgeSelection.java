@@ -49,6 +49,8 @@ public final class RollerEdgeSelection {
         boolean counterClockwiseOuter,
         boolean clockwiseOuter
     ) {
+        public static final EdgeSides NONE = new EdgeSides(false, false);
+
         public boolean hasOuterSide() {
             return counterClockwiseOuter || clockwiseOuter;
         }

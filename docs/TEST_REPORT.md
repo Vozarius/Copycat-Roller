@@ -17,13 +17,13 @@ Release verification environment:
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-The final version 1.1 build completed successfully. All 37 unit tests passed
+The final version 1.1 build completed successfully. All 44 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
 loaded Copycat Roller 1.1, Create 6, and Copycats+ 3.0.9, then passed all
-58/58 required GameTests in 1.084 seconds. The server run also verifies that
+59/59 required GameTests in 1.001 seconds. The server run also verifies that
 common code does not load client-only classes.
 
-The final build took 13 seconds; the dedicated GameTest run took 32 seconds.
+The final build took 12 seconds; the dedicated GameTest run took 25 seconds.
 
 ## Version 1.1 coverage
 
@@ -38,6 +38,11 @@ The new unit tests verify:
 - each following outward half-block step lowers the surface by half a block;
 - the reach formula matches Create's Wide Fill radius;
 - adjacent longitudinal track samples merge into one lateral shell;
+- non-emitting profiles from every Roller reserve the combined central mask
+  without blocking the selected outer side;
+- the nearest inward profile fixes a stable world-space outward normal;
+- reversing the track tangent cannot flip an explicitly resolved world side;
+- longitudinal-only or overlapping profile samples cannot invent a side;
 - straight profiles never extend beyond their two longitudinal ends;
 - only unsupported open ends are clipped while interior curve contours remain;
 - every planned Byte has a reachable predecessor in the prior height band;
@@ -56,6 +61,9 @@ The new GameTests verify:
   Roller filter;
 - only the two ends of a same-height, same-facing Roller row own outward Wide
   Fill sides; interior Rollers own none and a single Roller owns both;
+- a real three-Roller service call reads both neighbouring `PaveTask` profiles,
+  places Bytes from a Creative Crate, never enters their combined central X/Z
+  footprint, and places nothing new after the carriage yaw is reversed by 180°;
 - Create Creative Crates supply Copycat shapes, zinc conversion, and material
   filling without changing their infinite source stack.
 
@@ -67,10 +75,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-1.1.jar` — 140,854 bytes
-  - SHA-256: `8CDDB91E106CCE36EF2483BC10459F9E2B8C078CEA75DD0805FBDE388808793B`
-- `build/libs/copycat_roller-1.1-sources.jar` — 57,603 bytes
-  - SHA-256: `7A42F8A77C0958A544043656CDEBA131F631FE4EF7279BD3F31393E073D79910`
+- `build/libs/copycat_roller-1.1.jar` — 150,827 bytes
+  - SHA-256: `234E6831514B90177D86BCC30532B7B81C0804CDC781D300E59A459486BC4F68`
+- `build/libs/copycat_roller-1.1-sources.jar` — 61,509 bytes
+  - SHA-256: `BAB5EAEC13DB1192E4EEC1E08D5FC9781342FEC0834FF13C0288F985C56EF92F`
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this

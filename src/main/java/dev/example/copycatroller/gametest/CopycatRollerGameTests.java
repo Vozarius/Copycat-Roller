@@ -1,7 +1,9 @@
 package dev.example.copycatroller.gametest;
 
 import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -17,6 +19,7 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.AllItems;
 import com.simibubi.create.content.contraptions.bearing.BearingContraption;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
+import com.simibubi.create.content.contraptions.actors.roller.RollerBlock;
 import com.simibubi.create.content.contraptions.actors.roller.RollerBlockEntity;
 import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour;
 import com.simibubi.create.content.contraptions.actors.roller.TrackPaverV2;
@@ -38,6 +41,7 @@ import dev.example.copycatroller.paving.CopycatMaterialFillingService.FillPassRe
 import dev.example.copycatroller.paving.CopycatMaterialFillingService.FillResult;
 import dev.example.copycatroller.paving.CopycatMaterialFillingService.MaterialFillPlan;
 import dev.example.copycatroller.paving.CopycatPavingMaterial;
+import dev.example.copycatroller.paving.CopycatWideFillPavingService;
 import dev.example.copycatroller.paving.LayerMath;
 import dev.example.copycatroller.paving.PreciseTrackHeightSampler;
 import dev.example.copycatroller.paving.RollerMaterialPlacementCapture;
@@ -66,6 +70,7 @@ import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import net.neoforged.neoforge.items.ItemStackHandler;
+import org.apache.commons.lang3.tuple.MutablePair;
 
 @GameTestHolder(CopycatRoller.MOD_ID)
 @PrefixGameTestTemplate(false)
@@ -1793,6 +1798,133 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void wideFillBytesRespectCombinedRollerFootprint(
+        GameTestHelper helper
+    ) {
+        Level level = helper.getLevel();
+        BearingContraption contraption = new BearingContraption();
+        contraption.getStorage().initialize();
+        CreativeCrateMountedStorage zincSupply =
+            new CreativeCrateMountedStorage(AllItems.ZINC_INGOT.asStack());
+        contraption.getStorage().attachExternal(zincSupply);
+
+        CompoundTag rollerData = new CompoundTag();
+        rollerData.putInt("ScrollValue", 2);
+        BlockState rollerState = AllBlocks.MECHANICAL_ROLLER
+            .getDefaultState()
+            .setValue(RollerBlock.FACING, Direction.NORTH);
+        List<MovementContext> rollers = List.of(
+            rollerContext(level, contraption, rollerState, rollerData, -1),
+            rollerContext(level, contraption, rollerState, rollerData, 0),
+            rollerContext(level, contraption, rollerState, rollerData, 1)
+        );
+
+        BlockPos start = helper.absolutePos(new BlockPos(4, 8, 4));
+        Vec3 first = Vec3.atCenterOf(start);
+        Vec3 second = Vec3.atCenterOf(start.offset(0, 0, 5));
+        TrackGraph graph = new TrackGraph();
+        TrackNode node1 = node(level, first, 101);
+        TrackNode node2 = node(level, second, 102);
+        TrackEdge edge = new TrackEdge(
+            node1,
+            node2,
+            null,
+            TrackMaterial.ANDESITE
+        );
+
+        Map<MovementContext, PaveTask> profiles = new HashMap<>();
+        Set<Long> centralColumns = new java.util.HashSet<>();
+        for (MovementContext roller : rollers) {
+            // For a +Z edge, TrackPaver's positive interval points toward
+            // world -X, opposite the local east coordinate used by the row.
+            double offset = -roller.localPos.getX();
+            PaveTask task = new PaveTask(offset, offset);
+            TrackPaverV2.pave(task, graph, edge, 0, edge.getLength());
+            profiles.put(roller, task);
+            for (Couple<Integer> key : task.keys()) {
+                centralColumns.add(BlockPos.asLong(
+                    key.getFirst(),
+                    0,
+                    key.getSecond()
+                ));
+            }
+        }
+
+        int[] neighbourProfiles = {0};
+        MovementContext edgeRoller = rollers.getFirst();
+        boolean changed = CopycatWideFillPavingService.pave(
+            edgeRoller,
+            start,
+            profiles.get(edgeRoller),
+            roller -> {
+                neighbourProfiles[0]++;
+                return profiles.get(roller);
+            }
+        );
+        check(helper, changed, "combined Roller footprint placed no Bytes");
+        check(
+            helper,
+            neighbourProfiles[0] == 2,
+            "the edge Roller did not read both neighbouring profiles"
+        );
+
+        edgeRoller.rotation = vector -> vector.yRot((float) Math.PI);
+        boolean changedAfterCarriageTurn = CopycatWideFillPavingService.pave(
+            edgeRoller,
+            start,
+            profiles.get(edgeRoller),
+            profiles::get
+        );
+        check(
+            helper,
+            !changedAfterCarriageTurn,
+            "carriage yaw created a second slope at another track radius"
+        );
+
+        int minimumX = centralColumns.stream()
+            .mapToInt(value -> BlockPos.getX(value))
+            .min()
+            .orElseThrow();
+        int maximumX = centralColumns.stream()
+            .mapToInt(value -> BlockPos.getX(value))
+            .max()
+            .orElseThrow();
+        int minimumZ = centralColumns.stream()
+            .mapToInt(value -> BlockPos.getZ(value))
+            .min()
+            .orElseThrow();
+        int maximumZ = centralColumns.stream()
+            .mapToInt(value -> BlockPos.getZ(value))
+            .max()
+            .orElseThrow();
+
+        boolean foundByte = false;
+        for (int x = minimumX - 8; x <= maximumX + 8; x++) {
+            for (int z = minimumZ - 8; z <= maximumZ + 8; z++) {
+                for (int y = start.getY() - 10; y <= start.getY() + 3; y++) {
+                    BlockPos position = new BlockPos(x, y, z);
+                    if (!level.getBlockState(position).is(CCBlocks.COPYCAT_BYTE.get())) {
+                        continue;
+                    }
+                    foundByte = true;
+                    check(
+                        helper,
+                        !centralColumns.contains(BlockPos.asLong(x, 0, z)),
+                        "Copycat Byte entered the combined central footprint"
+                    );
+                }
+            }
+        }
+        check(helper, foundByte, "placed Byte surface was not found");
+        check(
+            helper,
+            CopycatLayerPavingService.isZincIngot(zincSupply.getStackInSlot(0)),
+            "Creative Crate lost its zinc supply"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void onlyEndsOfRollerRowOwnWideFillSides(GameTestHelper helper) {
         List<BlockPos> row = List.of(
             new BlockPos(-2, 4, 7),
@@ -1971,6 +2103,28 @@ public final class CopycatRollerGameTests {
             breakdown.baseLayers(),
             inventory
         );
+    }
+
+    private static MovementContext rollerContext(
+        Level level,
+        BearingContraption contraption,
+        BlockState rollerState,
+        CompoundTag rollerData,
+        int localX
+    ) {
+        BlockPos localPosition = new BlockPos(localX, 0, 0);
+        StructureBlockInfo info = new StructureBlockInfo(
+            localPosition,
+            rollerState,
+            rollerData.copy()
+        );
+        MovementContext context = new MovementContext(
+            level,
+            info,
+            contraption
+        );
+        contraption.getActors().add(MutablePair.of(info, context));
+        return context;
     }
 
     private static void assertStraightCoverage(

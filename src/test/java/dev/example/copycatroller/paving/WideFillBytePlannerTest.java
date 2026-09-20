@@ -106,6 +106,56 @@ class WideFillBytePlannerTest {
     }
 
     @Test
+    void allRollerFootprintsProtectTheCentralPavingMask() {
+        List<WideFillBytePlanner.ByteCell> cells = WideFillBytePlanner.plan(
+            List.of(
+                new WideFillBytePlanner.Seed(
+                    0, 0, 0.0, 1, 0, false, true
+                ),
+                new WideFillBytePlanner.Seed(
+                    0, 1, 0.0, 1, 0, false, false
+                ),
+                new WideFillBytePlanner.Seed(
+                    0, 2, 0.0, 1, 0, false, false
+                )
+            ),
+            3
+        );
+
+        assertTrue(
+            cells.isEmpty(),
+            "an edge must not emit into the footprints of the other Rollers"
+        );
+    }
+
+    @Test
+    void collectiveFootprintLeavesTheSelectedOuterSideConnected() {
+        List<WideFillBytePlanner.Seed> seeds = List.of(
+            new WideFillBytePlanner.Seed(
+                0, 0, 0.0, 1, 0, true, false
+            ),
+            new WideFillBytePlanner.Seed(
+                0, 1, 0.0, 1, 0, false, false
+            ),
+            new WideFillBytePlanner.Seed(
+                0, 2, 0.0, 1, 0, false, false
+            )
+        );
+        List<WideFillBytePlanner.ByteCell> cells =
+            WideFillBytePlanner.plan(seeds, 3);
+
+        assertFalse(cells.isEmpty());
+        assertTrue(cells.stream().allMatch(cell -> cell.halfZ() < 0));
+        for (int distance = 1; distance <= 6; distance++) {
+            int expectedDistance = distance;
+            assertTrue(cells.stream().anyMatch(cell ->
+                cell.distance() == expectedDistance
+            ));
+        }
+        assertEveryCellHasReachableParent(seeds, cells);
+    }
+
+    @Test
     void halfBlockTrackHeightRaisesTheWholeShellByOneHalfCell() {
         List<WideFillBytePlanner.ByteCell> level = WideFillBytePlanner.plan(
             List.of(new WideFillBytePlanner.Seed(0, 0, 0.0)),
@@ -146,6 +196,25 @@ class WideFillBytePlannerTest {
         assertTrue(positive.stream().allMatch(cell -> cell.halfZ() > 1));
     }
 
+    @Test
+    void explicitWorldNormalOverridesTangentHandedness() {
+        List<WideFillBytePlanner.ByteCell> forward = WideFillBytePlanner.plan(
+            List.of(new WideFillBytePlanner.Seed(
+                0, 0, 0.0, 1, 0, 0, -1, false, true
+            )),
+            1
+        );
+        List<WideFillBytePlanner.ByteCell> reversed = WideFillBytePlanner.plan(
+            List.of(new WideFillBytePlanner.Seed(
+                0, 0, 0.0, -1, 0, 0, -1, false, true
+            )),
+            1
+        );
+
+        assertEquals(forward, reversed);
+        assertFalse(forward.isEmpty());
+        assertTrue(forward.stream().allMatch(cell -> cell.halfZ() < 0));
+    }
     @Test
     void interiorSeedCreatesNoLateralSlope() {
         List<WideFillBytePlanner.ByteCell> cells = WideFillBytePlanner.plan(

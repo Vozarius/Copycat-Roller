@@ -21,14 +21,16 @@ in 1/8-block steps.
 - Safe, exact item consumption
 
 In normal **Fill** mode, put a supported Copycat or Zinc Ingot in the Roller
-filter. In **Wide Fill**, every Roller keeps normal central paving. Only the two
-outermost Rollers build Byte slopes, one outward side each, so adjacent Rollers
-do not create overlapping internal slopes. Curves follow the real local track
-tangent and remain connected at every outward height band. Open profile ends
-are clipped so repeated Roller steps do not create transverse Byte lobes in the
-center, while required lower support cells are preserved. The first Byte
-matches the central height, then every half-block step outward drops by half a
-block. Reach matches Create's normal Wide Fill.
+filter. In **Wide Fill**, every Roller keeps normal central paving. The exact
+profiles of all enabled Rollers in the row are first combined into a protected
+central mask, so Copycat Bytes cannot occupy positions reserved for ordinary
+blocks. Only the two outermost Rollers build Byte slopes, one outward side each.
+Curves follow the real local track tangent and remain connected at every height
+band; open profile ends are clipped while required support cells are preserved.
+The side is resolved from neighbouring Roller profiles, so turning carriages do
+not duplicate the slope at another radius.
+The first Byte matches the central height, then every half-block step outward
+drops by half a block. Reach matches Create's normal Wide Fill.
 
 One Zinc Ingot equals 8 Layers, 16 Half Layers, or 8 Copycat Bytes. Change is
 returned as real items; an operation is cancelled if its full cost or change
