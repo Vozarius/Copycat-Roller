@@ -17,13 +17,13 @@ Release verification environment:
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-The final version 1.1 build completed successfully. All 44 unit tests passed
+The final version 1.1 build completed successfully. All 47 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
 loaded Copycat Roller 1.1, Create 6, and Copycats+ 3.0.9, then passed all
-59/59 required GameTests in 1.001 seconds. The server run also verifies that
+61/61 required GameTests in 1.138 seconds. The server run also verifies that
 common code does not load client-only classes.
 
-The final build took 12 seconds; the dedicated GameTest run took 25 seconds.
+The final build took 13 seconds; the dedicated GameTest run took 31 seconds.
 
 ## Version 1.1 coverage
 
@@ -41,6 +41,12 @@ The new unit tests verify:
 - non-emitting profiles from every Roller reserve the combined central mask
   without blocking the selected outer side;
 - the nearest inward profile fixes a stable world-space outward normal;
+- station correspondence wins over a spatially nearer rounded cell from a
+  different longitudinal section;
+- read-only halo seeds shape a complete contour but never own world output;
+- adjacent track edges sharing one Create `PaveTask` retain separate section
+  identities, so equal local station values cannot select the wrong side;
+- only sources on the exterior boundary of the combined Roller footprint emit;
 - reversing the track tangent cannot flip an explicitly resolved world side;
 - longitudinal-only or overlapping profile samples cannot invent a side;
 - straight profiles never extend beyond their two longitudinal ends;
@@ -64,6 +70,10 @@ The new GameTests verify:
 - a real three-Roller service call reads both neighbouring `PaveTask` profiles,
   places Bytes from a Creative Crate, never enters their combined central X/Z
   footprint, and places nothing new after the carriage yaw is reversed by 180°;
+- a short real `TrackPaverV2` window expands longitudinally for read-only
+  context while retaining a smaller, explicitly writable core;
+- two adjacent real `TrackEdge` calls can append to one `PaveTask` without
+  losing precise samples, confusing their stations, or crashing the server;
 - Create Creative Crates supply Copycat shapes, zinc conversion, and material
   filling without changing their infinite source stack.
 
@@ -75,10 +85,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-1.1.jar` — 150,827 bytes
-  - SHA-256: `234E6831514B90177D86BCC30532B7B81C0804CDC781D300E59A459486BC4F68`
-- `build/libs/copycat_roller-1.1-sources.jar` — 61,509 bytes
-  - SHA-256: `BAB5EAEC13DB1192E4EEC1E08D5FC9781342FEC0834FF13C0288F985C56EF92F`
+- `build/libs/copycat_roller-1.1.jar` — 161,005 bytes
+  - SHA-256: `4DBECF46430353E1778B06D8B8AE7608234D8A86A010047108D0A67C72FE002C`
+- `build/libs/copycat_roller-1.1-sources.jar` — 64,563 bytes
+  - SHA-256: `19A445EF85865E6E04438E0C0F71CA1613AFB2E2B18DA6660D3EC598C3314537`
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this

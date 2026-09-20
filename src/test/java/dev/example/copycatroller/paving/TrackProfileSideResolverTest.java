@@ -62,11 +62,61 @@ class TrackProfileSideResolverTest {
         assertEquals(-inverseRootTwo, normal.z(), EPSILON);
     }
 
+    @Test
+    void stationCorrespondenceWinsOverNearestQuantizedCell() {
+        var normal = TrackProfileSideResolver.outwardNormal(
+            sample(10, 10, 1, 0, 10),
+            List.of(
+                sample(10, 11, 1, 0, 20),
+                sample(10, 8, 1, 0, 10)
+            )
+        ).orElseThrow();
+
+        assertEquals(0, normal.x(), EPSILON);
+        assertEquals(1, normal.z(), EPSILON);
+    }
+
+
     private static TrackSurfaceSample sample(
         int x,
         int z,
         double tangentX,
         double tangentZ
+    ) {
+        return sample(x, z, tangentX, tangentZ, 0);
+    }
+
+    @Test
+    void adjacentEdgeStationsCannotStealSideCorrespondence() {
+        TrackSurfaceSample edge = sample(10, 10, 1, 0, 0, 7);
+        var normal = TrackProfileSideResolver.outwardNormal(
+            edge,
+            List.of(
+                sample(10, 9, 1, 0, 0, 8),
+                sample(10, 12, 1, 0, 1, 7)
+            )
+        ).orElseThrow();
+
+        assertEquals(0, normal.x(), EPSILON);
+        assertEquals(-1, normal.z(), EPSILON);
+    }
+    private static TrackSurfaceSample sample(
+        int x,
+        int z,
+        double tangentX,
+        double tangentZ,
+        double station
+    ) {
+        return sample(x, z, tangentX, tangentZ, station, 0);
+    }
+
+    private static TrackSurfaceSample sample(
+        int x,
+        int z,
+        double tangentX,
+        double tangentZ,
+        double station,
+        long sectionKey
     ) {
         return new TrackSurfaceSample(
             x,
@@ -75,7 +125,9 @@ class TrackProfileSideResolverTest {
             tangentX,
             tangentZ,
             0,
-            0
+            0,
+            station,
+            sectionKey
         );
     }
 }

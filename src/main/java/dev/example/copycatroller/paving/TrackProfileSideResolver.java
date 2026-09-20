@@ -26,8 +26,16 @@ public final class TrackProfileSideResolver {
         double canonicalNormalZ = tangentX;
 
         TrackSurfaceSample best = null;
+        double bestStationDelta = Double.POSITIVE_INFINITY;
         double bestScore = Double.POSITIVE_INFINITY;
+        boolean hasSameSection = edge.sectionKey() != 0
+            && inwardSamples.stream().anyMatch(
+                candidate -> candidate.sectionKey() == edge.sectionKey()
+            );
         for (TrackSurfaceSample candidate : inwardSamples) {
+            if (hasSameSection && candidate.sectionKey() != edge.sectionKey()) {
+                continue;
+            }
             double outwardX = edge.x() - candidate.x();
             double outwardZ = edge.z() - candidate.z();
             double lateral = outwardX * canonicalNormalX
@@ -50,8 +58,14 @@ public final class TrackProfileSideResolver {
             double score = squaredDistance
                 + along * along * 0.5
                 + (1 - tangentAlignment) * 0.25;
-            if (score < bestScore) {
+            double stationDelta = Math.abs(
+                edge.station() - candidate.station()
+            );
+            if (stationDelta + DIRECTION_EPSILON < bestStationDelta
+                || Math.abs(stationDelta - bestStationDelta)
+                    <= DIRECTION_EPSILON && score < bestScore) {
                 best = candidate;
+                bestStationDelta = stationDelta;
                 bestScore = score;
             }
         }

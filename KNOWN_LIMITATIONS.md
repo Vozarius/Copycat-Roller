@@ -101,22 +101,28 @@
     Rollers. Only the two edge Rollers emit Bytes, and each emits away from the
     row; interior Rollers emit none. A single Roller owns both sides. Profiles
     are gathered synchronously from `Contraption.getActors()` and no context,
-    level, entity, or contraption reference is retained after the call. For
-    each edge sample, the closest inward Roller profile selects the sign of the
-    smooth track normal in world space; carriage yaw is never used for a train
-    side. An ambiguous sample with no lateral separation is skipped instead of
-    guessing, so a turn cannot create a second slope radius. Curves use the
-    normalized local tangent captured before Create quantizes the profile.
-    Each output half-column is owned by its nearest track sample and
-    receives one distance band. The field is quantized into nested,
-    diagonal-connected contours. Cells past an unsupported longitudinal end
-    are rejected, while minimal support chains keep visible outer bands
-    reachable. The first side Byte matches the central surface height; every
-    following half-block step lowers by one half block. Maximum reach is
-    `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill radius.
-    A solid obstacle terminates only the affected branch, which prevents
-    placement through walls but can leave an intentional opening.
+    level, entity, or contraption reference is retained after the call.
 
+    The edge and inward profiles are matched by the unquantized station along
+    the same `TrackEdge`, rather than by the nearest rounded X/Z cell. Each
+    Create work window is extended by the configured Byte reach plus two blocks
+    at both longitudinal ends. These halo samples shape the distance field and
+    the exterior mask but never own world output. Only source half-cells on the
+    actual exterior boundary may emit. This makes overlapping actor calls agree
+    on one contour and prevents moving end caps, internal fans, gaps, and a
+    duplicate radius when the carriage turns. An ambiguous sample with no
+    lateral separation is still skipped instead of guessing.
+
+    Curves use the normalized local tangent captured before Create quantizes
+    the profile. Each output half-column is owned by its nearest track sample
+    and receives one distance band. The field is quantized into nested,
+    diagonal-connected contours. At a physical open end of the `TrackEdge`,
+    unsupported cells are rejected, while minimal support chains keep visible
+    outer bands reachable. The first side Byte matches the central surface
+    height; every following half-block step lowers by one half block. Maximum
+    reach is `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill
+    radius. A solid obstacle terminates only the affected branch, which
+    prevents placement through walls but can leave an intentional opening.
 17. Copycat Byte is reserved for automatic zinc Wide Fill and is not accepted
     as a direct Roller filter. Non-zinc Wide Fill, Tunnel Pave, and all unrelated
     filters retain Create's standard behavior.

@@ -22,13 +22,12 @@ in 1/8-block steps.
 
 In normal **Fill** mode, put a supported Copycat or Zinc Ingot in the Roller
 filter. In **Wide Fill**, every Roller keeps normal central paving. The exact
-profiles of all enabled Rollers in the row are first combined into a protected
-central mask, so Copycat Bytes cannot occupy positions reserved for ordinary
-blocks. Only the two outermost Rollers build Byte slopes, one outward side each.
-Curves follow the real local track tangent and remain connected at every height
-band; open profile ends are clipped while required support cells are preserved.
-The side is resolved from neighbouring Roller profiles, so turning carriages do
-not duplicate the slope at another radius.
+profiles of all enabled Rollers in the row are combined into a protected mask,
+so Copycat Bytes cannot occupy positions reserved for ordinary blocks. Only the
+two outermost Rollers build from its real exterior boundary. Curves are matched
+by continuous track distance, and each short work window reads extra context on
+both ends without placing there. This keeps every height band connected and
+prevents moving end caps, gaps, or a second slope radius when the carriage turns.
 The first Byte matches the central height, then every half-block step outward
 drops by half a block. Reach matches Create's normal Wide Fill.
 

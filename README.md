@@ -23,15 +23,16 @@ In **Wide Fill** (`WIDE_FILL`) mode, a Zinc Ingot keeps normal central paving
 under every Roller. Before creating the side slope, the addon combines the
 exact track profiles of every enabled Wide Fill Roller in the same row into one
 protected central mask. Copycat Bytes can never occupy that mask. Only the two
-outermost Rollers emit Bytes, one outward side each. Curves follow the local
-track tangent as connected distance contours; unsupported ends of Create's
-short profile are clipped and minimal support cells are restored when needed.
-The outward side is derived from the edge Roller and its nearest inward
-neighbour in world space, so carriage rotation on a curve cannot build the
-same slope again at another radius.
-The profiles are read synchronously for the current operation and are never
-cached with the world or contraption. The first side Byte matches the height
-under the edge Roller; every following half-block step drops by half a block.
+outermost Rollers emit Bytes, one outward side each, and only from the real
+exterior boundary of that mask. Curves use a continuous station along the track
+instead of pairing already rounded X/Z cells. Each short Create work window is
+sampled with a read-only longitudinal halo, so neighbouring calls agree on the
+same connected contours without creating moving end caps or gaps. The outward
+side is derived from the edge Roller and its nearest inward neighbour in world
+space, so carriage rotation on a curve cannot build the same slope again at
+another radius. Profiles and halos are used synchronously and are never cached
+with the world or contraption. The first side Byte matches the height under the
+edge Roller; every following half-block step drops by half a block.
 Reach matches Create's normal Wide Fill radius, and obstacles stop only the
 affected branch.
 

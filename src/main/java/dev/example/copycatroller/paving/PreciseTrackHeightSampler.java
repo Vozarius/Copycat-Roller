@@ -4,13 +4,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.TrackPaverV2;
 import com.simibubi.create.content.trains.graph.TrackEdge;
+import dev.example.copycatroller.CopycatRoller;
 import com.simibubi.create.content.trains.graph.TrackGraph;
 import com.simibubi.create.content.trains.track.BezierConnection;
 import net.createmod.catnip.data.Couple;
@@ -25,27 +28,47 @@ import net.minecraft.world.phys.Vec3;
  * reduces to an integer (straight track) or half block (Bezier track).
  */
 public final class PreciseTrackHeightSampler {
-    private static final Map<PaveTask, Map<ColumnKey, HeightCapture>> CAPTURES =
+    private static final Map<PaveTask, CaptureData> CAPTURES =
         Collections.synchronizedMap(new WeakHashMap<>());
 
     private PreciseTrackHeightSampler() {
     }
 
-    public static void capture(PaveTask task, TrackGraph graph, TrackEdge edge, double from, double to) {
+    public static void capture(
+        PaveTask task,
+        TrackGraph graph,
+        TrackEdge edge,
+        double from,
+        double to
+    ) {
+        long sectionKey = sectionKey(edge);
+        synchronized (CAPTURES) {
+            CaptureData data = CAPTURES.computeIfAbsent(
+                task,
+                ignored -> new CaptureData(
+                    new ArrayList<>(),
+                    new HashMap<>()
+                )
+            );
+            data.segments().add(new CaptureSegment(
+                graph,
+                edge,
+                from,
+                to
+            ));
+        }
         if (edge.isTurn()) {
-            captureCurve(task, edge.getTurn(), from, to);
+            captureCurve(task, edge.getTurn(), from, to, sectionKey);
         } else {
-            captureStraight(task, graph, edge, from, to);
+            captureStraight(task, graph, edge, from, to, sectionKey);
         }
     }
 
     public static List<TrackSurfaceSample> samples(PaveTask task, int rollerLocalY) {
         Map<ColumnKey, HeightCapture> captured;
         synchronized (CAPTURES) {
-            captured = CAPTURES.get(task);
-            if (captured != null) {
-                captured = Map.copyOf(captured);
-            }
+            CaptureData data = CAPTURES.get(task);
+            captured = data == null ? null : Map.copyOf(data.heights());
         }
 
         if (task.keys().isEmpty()) {
@@ -56,11 +79,13 @@ public final class PreciseTrackHeightSampler {
         }
 
         List<TrackSurfaceSample> result = new ArrayList<>(task.keys().size());
+        int recoveredSamples = 0;
         for (Couple<Integer> coordinates : task.keys()) {
             ColumnKey key = new ColumnKey(coordinates.getFirst(), coordinates.getSecond());
             HeightCapture capture = captured.get(key);
             if (capture == null) {
-                throw new IllegalStateException("Missing precise track height for " + key.x + ", " + key.z);
+                capture = recoverMissingHeight(task, coordinates, captured);
+                recoveredSamples++;
             }
             result.add(new TrackSurfaceSample(
                 key.x,
@@ -69,14 +94,103 @@ public final class PreciseTrackHeightSampler {
                 capture.tangentX,
                 capture.tangentZ,
                 capture.gradientX,
-                capture.gradientZ
+                capture.gradientZ,
+                capture.station,
+                capture.sectionKey
             ));
+        }
+        if (recoveredSamples > 0) {
+            CopycatRoller.LOGGER.warn(
+                "Recovered {} precise track sample(s) from Create's quantized profile",
+                recoveredSamples
+            );
         }
         result.sort(Comparator.comparingInt(TrackSurfaceSample::x).thenComparingInt(TrackSurfaceSample::z));
         return List.copyOf(result);
     }
 
-    private static void captureStraight(PaveTask task, TrackGraph graph, TrackEdge edge, double from, double to) {
+    public static ProfileWindow samplesWithHalo(
+        PaveTask task,
+        int rollerLocalY,
+        double haloDistance
+    ) {
+        if (haloDistance < 0 || !Double.isFinite(haloDistance)) {
+            throw new IllegalArgumentException("haloDistance must be finite and non-negative");
+        }
+        List<CaptureSegment> segments;
+        synchronized (CAPTURES) {
+            CaptureData data = CAPTURES.get(task);
+            segments = data == null ? null : List.copyOf(data.segments());
+        }
+        if (segments == null) {
+            throw new IllegalStateException("Create returned a track paving profile without capture metadata");
+        }
+
+        List<TrackSurfaceSample> coreSamples = samples(task, rollerLocalY);
+        if (coreSamples.isEmpty() || haloDistance == 0) {
+            return ProfileWindow.core(coreSamples);
+        }
+        Set<Long> coreColumns = new HashSet<>();
+        for (TrackSurfaceSample sample : coreSamples) {
+            coreColumns.add(columnId(sample.x(), sample.z()));
+        }
+
+        PaveTask expanded = new PaveTask(
+            task.getHorizontalInterval().getFirst(),
+            task.getHorizontalInterval().getSecond()
+        );
+        for (CaptureSegment segment : segments) {
+            double edgeLength = segment.edge().getLength();
+            double expandedFrom = Math.max(
+                0,
+                Math.min(segment.from(), segment.to()) - haloDistance
+            );
+            double expandedTo = Math.min(
+                edgeLength,
+                Math.max(segment.from(), segment.to()) + haloDistance
+            );
+            int capturesBefore = captureCount(expanded);
+            TrackPaverV2.pave(
+                expanded,
+                segment.graph(),
+                segment.edge(),
+                expandedFrom,
+                expandedTo
+            );
+            // Production reaches capture through the required TrackPaver
+            // Mixin. Keep a no-Mixin fallback for isolated tests without doing
+            // the expensive geometry pass twice on a running server.
+            if (captureCount(expanded) == capturesBefore) {
+                capture(
+                    expanded,
+                    segment.graph(),
+                    segment.edge(),
+                    expandedFrom,
+                    expandedTo
+                );
+            }
+        }
+        return new ProfileWindow(
+            samples(expanded, rollerLocalY),
+            Set.copyOf(coreColumns)
+        );
+    }
+
+    private static int captureCount(PaveTask task) {
+        synchronized (CAPTURES) {
+            CaptureData data = CAPTURES.get(task);
+            return data == null ? 0 : data.segments().size();
+        }
+    }
+
+    private static void captureStraight(
+        PaveTask task,
+        TrackGraph graph,
+        TrackEdge edge,
+        double from,
+        double to,
+        long sectionKey
+    ) {
         Vec3 location1 = edge.node1.getLocation().getLocation();
         Vec3 location2 = edge.node2.getLocation().getLocation();
         Vec3 difference = location2.subtract(location1);
@@ -134,12 +248,20 @@ public final class PreciseTrackHeightSampler {
                 difference.x,
                 difference.z,
                 levelEdge ? 0 : gradientX,
-                levelEdge ? 0 : gradientZ
+                levelEdge ? 0 : gradientZ,
+                t * length,
+                sectionKey
             );
         }
     }
 
-    private static void captureCurve(PaveTask task, BezierConnection curve, double from, double to) {
+    private static void captureCurve(
+        PaveTask task,
+        BezierConnection curve,
+        double from,
+        double to,
+        long sectionKey
+    ) {
         PaveTask coverage = new PaveTask(
             task.getHorizontalInterval().getFirst(),
             task.getHorizontalInterval().getSecond()
@@ -222,7 +344,9 @@ public final class PreciseTrackHeightSampler {
                     tangent.x,
                     tangent.z,
                     gradientX,
-                    gradientZ
+                    gradientZ,
+                    (t + t1) * 0.5 * curve.getLength(),
+                    sectionKey
                 );
             }
         }
@@ -278,6 +402,87 @@ public final class PreciseTrackHeightSampler {
             : s >= 0 && t >= 0 && s + t <= determinant;
     }
 
+    private static HeightCapture recoverMissingHeight(
+        PaveTask task,
+        Couple<Integer> coordinates,
+        Map<ColumnKey, HeightCapture> captured
+    ) {
+        int x = coordinates.getFirst();
+        int z = coordinates.getSecond();
+        Map.Entry<ColumnKey, HeightCapture> nearest = null;
+        long nearestDistance = Long.MAX_VALUE;
+        for (Map.Entry<ColumnKey, HeightCapture> entry : captured.entrySet()) {
+            long deltaX = (long) x - entry.getKey().x();
+            long deltaZ = (long) z - entry.getKey().z();
+            long distance = deltaX * deltaX + deltaZ * deltaZ;
+            if (distance < nearestDistance) {
+                nearest = entry;
+                nearestDistance = distance;
+            }
+        }
+
+        double createY = task.get(coordinates);
+        if (nearest == null) {
+            return new HeightCapture(createY, 1, 0, 0, 0, 0, 0);
+        }
+
+        ColumnKey sourcePosition = nearest.getKey();
+        HeightCapture source = nearest.getValue();
+        double deltaX = x - sourcePosition.x();
+        double deltaZ = z - sourcePosition.z();
+        double predictedY = source.y()
+            + source.gradientX() * deltaX
+            + source.gradientZ() * deltaZ;
+        predictedY += createY - quantizeLikeCreate(predictedY);
+
+        double tangentLength = Math.hypot(source.tangentX(), source.tangentZ());
+        double station = source.station();
+        if (tangentLength > 1.0e-12) {
+            station += (
+                deltaX * source.tangentX() + deltaZ * source.tangentZ()
+            ) / tangentLength;
+        }
+        return new HeightCapture(
+            predictedY,
+            source.tangentX(),
+            source.tangentZ(),
+            source.gradientX(),
+            source.gradientZ(),
+            station,
+            source.sectionKey()
+        );
+    }
+
+    private static double quantizeLikeCreate(double y) {
+        double base = Math.floor(y);
+        return base + (y - base >= 0.5 ? 0.5 : 0);
+    }
+
+    private static long sectionKey(TrackEdge edge) {
+        long first = vectorKey(edge.node1.getLocation().getLocation());
+        long second = vectorKey(edge.node2.getLocation().getLocation());
+        if (Long.compareUnsigned(first, second) > 0) {
+            long swap = first;
+            first = second;
+            second = swap;
+        }
+        long hash = 0xcbf29ce484222325L;
+        hash = (hash ^ first) * 0x100000001b3L;
+        hash = (hash ^ second) * 0x100000001b3L;
+        return (hash ^ (edge.isTurn() ? 1 : 0)) * 0x100000001b3L;
+    }
+
+    private static long vectorKey(Vec3 position) {
+        long hash = 0xcbf29ce484222325L;
+        hash = (hash ^ Double.doubleToLongBits(position.x)) * 0x100000001b3L;
+        hash = (hash ^ Double.doubleToLongBits(position.y)) * 0x100000001b3L;
+        return (hash ^ Double.doubleToLongBits(position.z)) * 0x100000001b3L;
+    }
+
+    private static long columnId(int x, int z) {
+        return (long) x << 32 ^ z & 0xffffffffL;
+    }
+
     private static void putMinimum(
         PaveTask task,
         int x,
@@ -286,23 +491,29 @@ public final class PreciseTrackHeightSampler {
         double tangentX,
         double tangentZ,
         double gradientX,
-        double gradientZ
+        double gradientZ,
+        double station,
+        long sectionKey
     ) {
         HeightCapture next = new HeightCapture(
             y,
             tangentX,
             tangentZ,
             gradientX,
-            gradientZ
+            gradientZ,
+            station,
+            sectionKey
         );
         synchronized (CAPTURES) {
-            CAPTURES
-                .computeIfAbsent(task, ignored -> new HashMap<>())
-                .merge(
-                    new ColumnKey(x, z),
-                    next,
-                    (current, candidate) -> candidate.y < current.y ? candidate : current
-                );
+            CaptureData data = CAPTURES.get(task);
+            if (data == null) {
+                throw new IllegalStateException("capture metadata disappeared during track sampling");
+            }
+            data.heights().merge(
+                new ColumnKey(x, z),
+                next,
+                (current, candidate) -> candidate.y < current.y ? candidate : current
+            );
         }
     }
 
@@ -314,7 +525,45 @@ public final class PreciseTrackHeightSampler {
         double tangentX,
         double tangentZ,
         double gradientX,
-        double gradientZ
+        double gradientZ,
+        double station,
+        long sectionKey
     ) {
+    }
+
+    private record CaptureSegment(
+        TrackGraph graph,
+        TrackEdge edge,
+        double from,
+        double to
+    ) {
+    }
+
+    private record CaptureData(
+        List<CaptureSegment> segments,
+        Map<ColumnKey, HeightCapture> heights
+    ) {
+    }
+
+    public record ProfileWindow(
+        List<TrackSurfaceSample> samples,
+        Set<Long> coreColumns
+    ) {
+        public ProfileWindow {
+            samples = List.copyOf(samples);
+            coreColumns = Set.copyOf(coreColumns);
+        }
+
+        public static ProfileWindow core(List<TrackSurfaceSample> samples) {
+            Set<Long> columns = new HashSet<>();
+            for (TrackSurfaceSample sample : samples) {
+                columns.add(columnId(sample.x(), sample.z()));
+            }
+            return new ProfileWindow(samples, columns);
+        }
+
+        public boolean isCore(TrackSurfaceSample sample) {
+            return coreColumns.contains(columnId(sample.x(), sample.z()));
+        }
     }
 }

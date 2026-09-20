@@ -8,7 +8,10 @@ import net.minecraft.core.Direction;
  * <p>The gradient is expressed in world coordinates: {@code gradientX} is the
  * Y change per one world-space X block and {@code gradientZ} is the equivalent
  * value for Z. The tangent is kept separately so level track still has a
- * deterministic longitudinal axis.</p>
+ * deterministic longitudinal axis. {@code station} is the unquantized distance
+ * along the current {@code TrackEdge} and is used to match neighbouring Roller
+ * profiles before their X/Z coverage is rounded. {@code sectionKey} identifies
+ * the source track edge so stations from adjacent edges cannot be confused.</p>
  */
 public record TrackSurfaceSample(
     int x,
@@ -17,12 +20,59 @@ public record TrackSurfaceSample(
     double tangentX,
     double tangentZ,
     double gradientX,
-    double gradientZ
+    double gradientZ,
+    double station,
+    long sectionKey
 ) {
     private static final double DIRECTION_EPSILON = 1.0e-9;
 
     public TrackSurfaceSample(int x, int z, double surfaceY) {
-        this(x, z, surfaceY, 1, 0, 0, 0);
+        this(x, z, surfaceY, 1, 0, 0, 0, 0, 0);
+    }
+
+    public TrackSurfaceSample(
+        int x,
+        int z,
+        double surfaceY,
+        double tangentX,
+        double tangentZ,
+        double gradientX,
+        double gradientZ
+    ) {
+        this(
+            x,
+            z,
+            surfaceY,
+            tangentX,
+            tangentZ,
+            gradientX,
+            gradientZ,
+            0,
+            0
+        );
+    }
+
+    public TrackSurfaceSample(
+        int x,
+        int z,
+        double surfaceY,
+        double tangentX,
+        double tangentZ,
+        double gradientX,
+        double gradientZ,
+        double station
+    ) {
+        this(
+            x,
+            z,
+            surfaceY,
+            tangentX,
+            tangentZ,
+            gradientX,
+            gradientZ,
+            station,
+            0
+        );
     }
 
     public TrackSurfaceSample {
@@ -30,7 +80,8 @@ public record TrackSurfaceSample(
             || !Double.isFinite(tangentX)
             || !Double.isFinite(tangentZ)
             || !Double.isFinite(gradientX)
-            || !Double.isFinite(gradientZ)) {
+            || !Double.isFinite(gradientZ)
+            || !Double.isFinite(station)) {
             throw new IllegalArgumentException("track surface sample values must be finite");
         }
         if (Math.abs(tangentX) < DIRECTION_EPSILON

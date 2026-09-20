@@ -11,6 +11,7 @@ import com.simibubi.create.content.contraptions.actors.roller.RollerBlock;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import com.simibubi.create.infrastructure.config.AllConfigs;
 import dev.example.copycatroller.paving.CopycatLayerPavingService.PlacementResult;
+import dev.example.copycatroller.paving.PreciseTrackHeightSampler.ProfileWindow;
 import dev.example.copycatroller.paving.RollerEdgeSelection.EdgeSides;
 import dev.example.copycatroller.paving.WideFillBytePlanner.ByteCell;
 import dev.example.copycatroller.paving.WideFillBytePlanner.HalfVoxel;
@@ -75,27 +76,34 @@ public final class CopycatWideFillPavingService {
         }
 
         Direction clockwise = localFacing.getClockWise();
+        int reach = WideFillBytePlanner.reachBlocksForCreateDepth(
+            AllConfigs.server().kinetics.rollerFillDepth.get()
+        );
+        double profileHalo = reach + 2.0;
         List<RollerProfile> profiles = new ArrayList<>();
         for (MovementContext roller : rowRollers) {
             PaveTask profile = roller == context
                 ? trackProfile
                 : profileProvider.create(roller);
-            List<TrackSurfaceSample> samples;
+            ProfileWindow window;
             if (profile != null) {
-                samples = PreciseTrackHeightSampler.samples(
+                window = PreciseTrackHeightSampler.samplesWithHalo(
                     profile,
-                    roller.localPos.getY()
+                    roller.localPos.getY(),
+                    profileHalo
                 );
             } else if (roller == context) {
-                samples = List.of(fallbackSample(context, fallbackPosition));
+                window = ProfileWindow.core(List.of(
+                    fallbackSample(context, fallbackPosition)
+                ));
             } else {
                 continue;
             }
-            if (!samples.isEmpty()) {
+            if (!window.samples().isEmpty()) {
                 profiles.add(new RollerProfile(
                     roller == context,
                     projection(roller.localPos, clockwise),
-                    samples
+                    window
                 ));
             }
         }
@@ -114,7 +122,9 @@ public final class CopycatWideFillPavingService {
         );
         List<Seed> seeds = new ArrayList<>();
         for (RollerProfile profile : profiles) {
-            for (TrackSurfaceSample sample : profile.samples()) {
+            for (TrackSurfaceSample sample : profile.window().samples()) {
+                boolean outputOwner = profile.current()
+                    && profile.window().isCore(sample);
                 if (!profile.current()) {
                     seeds.add(new Seed(
                         sample.x(),
@@ -122,6 +132,7 @@ public final class CopycatWideFillPavingService {
                         sample.minimumCellSurfaceY(),
                         sample.tangentX(),
                         sample.tangentZ(),
+                        false,
                         false,
                         false
                     ));
@@ -132,17 +143,31 @@ public final class CopycatWideFillPavingService {
                         sample.z(),
                         sample.minimumCellSurfaceY(),
                         sample.tangentX(),
-                        sample.tangentZ()
+                        sample.tangentZ(),
+                        -sample.tangentZ(),
+                        sample.tangentX(),
+                        true,
+                        true,
+                        outputOwner
                     ));
                 } else if (inwardProfile != null) {
-                    seeds.add(stableOutwardSeed(sample, inwardProfile.samples()));
+                    seeds.add(stableOutwardSeed(
+                        sample,
+                        inwardProfile.window().samples(),
+                        outputOwner
+                    ));
                 } else if (trackProfile == null) {
                     // Non-track contraptions have no neighbouring PaveTask from
                     // which a stable world side can be reconstructed.
                     Vec3 fallbackClockwiseWorld = context.rotation.apply(
                         Vec3.atLowerCornerOf(clockwise.getNormal())
                     );
-                    seeds.add(seedFor(sample, edges, fallbackClockwiseWorld));
+                    seeds.add(seedFor(
+                        sample,
+                        edges,
+                        fallbackClockwiseWorld,
+                        outputOwner
+                    ));
                 } else {
                     // Never guess a train side from carriage yaw. If the
                     // neighbouring profile is unavailable, skipping this
@@ -154,6 +179,7 @@ public final class CopycatWideFillPavingService {
                         sample.tangentX(),
                         sample.tangentZ(),
                         false,
+                        false,
                         false
                     ));
                 }
@@ -162,9 +188,6 @@ public final class CopycatWideFillPavingService {
         if (seeds.isEmpty()) {
             return false;
         }
-        int reach = WideFillBytePlanner.reachBlocksForCreateDepth(
-            AllConfigs.server().kinetics.rollerFillDepth.get()
-        );
         List<ByteCell> cells = WideFillBytePlanner.plan(seeds, reach);
         if (cells.isEmpty()) {
             return false;
@@ -246,7 +269,8 @@ public final class CopycatWideFillPavingService {
 
     private static Seed stableOutwardSeed(
         TrackSurfaceSample edge,
-        List<TrackSurfaceSample> inwardSamples
+        List<TrackSurfaceSample> inwardSamples,
+        boolean outputOwner
     ) {
         var outward = TrackProfileSideResolver.outwardNormal(
             edge,
@@ -263,6 +287,7 @@ public final class CopycatWideFillPavingService {
                 edge.tangentX(),
                 edge.tangentZ(),
                 false,
+                false,
                 false
             );
         }
@@ -276,14 +301,16 @@ public final class CopycatWideFillPavingService {
             normal.x(),
             normal.z(),
             false,
-            true
+            true,
+            outputOwner
         );
     }
 
     private static Seed seedFor(
         TrackSurfaceSample sample,
         EdgeSides edges,
-        Vec3 clockwiseWorld
+        Vec3 clockwiseWorld,
+        boolean outputOwner
     ) {
         double tangentLength = Math.hypot(
             sample.tangentX(),
@@ -310,8 +337,11 @@ public final class CopycatWideFillPavingService {
             sample.minimumCellSurfaceY(),
             sample.tangentX(),
             sample.tangentZ(),
+            positiveNormalX,
+            positiveNormalZ,
             allowNegative,
-            allowPositive
+            allowPositive,
+            outputOwner
         );
     }
 
@@ -360,7 +390,7 @@ public final class CopycatWideFillPavingService {
     private record RollerProfile(
         boolean current,
         int localLateral,
-        List<TrackSurfaceSample> samples
+        ProfileWindow window
     ) {
     }
     @FunctionalInterface

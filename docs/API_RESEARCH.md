@@ -345,23 +345,41 @@ its own normal Create actor call; an interior Roller returns before planning a
 slope. Thus no Byte candidate can be accepted in a cell reserved by any Roller,
 including the cells directly under the two edges.
 
-For each edge sample, the service finds the nearest laterally valid sample from
-the closest inward Roller's profile. The vector from that inner sample to the
-edge sample selects the sign of the normalized track normal
+Every captured sample now carries its unquantized station along the `TrackEdge`.
+For each edge sample, the service first minimizes station difference against the
+closest inward Roller's profile, then uses lateral distance only as a tie-break.
+The resulting vector selects the sign of the normalized track normal
 `(-tangentZ, tangentX)`. The normal therefore remains smooth, but its world side
-comes from the two track profiles rather than the carriage's instantaneous yaw.
-Overlapping quantized samples with no lateral evidence are non-emitting instead
-of guessing a side. This prevents a turning train from paving the same slope at
-two different radii without retaining cross-tick state.
+comes from corresponding cross-sections rather than the nearest rounded X/Z
+cell or the carriage's instantaneous yaw. Overlapping samples with no lateral
+evidence are non-emitting instead of guessing a side.
+
+Create supplies a short moving `PaveTask`. At a graph boundary, Create may append
+several consecutive `TrackPaverV2.pave(...)` results for adjacent `TrackEdge`s to
+that same task. The capture side-channel therefore accumulates every segment
+instead of replacing the previous edge. Each sample carries a deterministic,
+direction-independent edge key so equal station values from adjacent edges are
+never matched as the same cross-section.
+
+The service reconstructs every captured segment with a longitudinal halo equal
+to the Byte reach plus two blocks at both ends, clamped independently to each
+edge. Halo samples participate in geometry but carry no output ownership; only
+X/Z columns present in the original task may change the world. If a future
+Create 6 patch leaves an isolated task column outside the captured geometry,
+the sampler reconstructs it from the nearest precise gradient while constraining
+its Y to Create's quantized result and emits one warning instead of crashing the
+server tick. The weak task-keyed metadata remains temporary and never becomes
+cross-tick contraption state.
 
 Candidate half-columns are resolved by a nearest-sample distance field over the
-complete mask: Euclidean distance chooses one owner, while the owner's emission
-flag and explicit world normal choose the permitted outer side.
-The field is quantized into nested half-cell contours, including diagonal steps
-on curves. A candidate is clipped only when its along-track projection exceeds
-0.75 half-cells toward an unsupported open end. If a retained cell lacks a
-reachable predecessor in the previous height band, the planner restores the
-smallest recursive support chain from the side-valid field. The first side
+complete mask. Before emission, every source is tested against the union of all
+Roller half-cell footprints; only the real exterior boundary keeps an outward
+flag. Euclidean distance chooses one owner, while that boundary flag and the
+explicit world normal choose the permitted side. The field is quantized into
+nested half-cell contours, including diagonal steps on curves. A candidate is
+clipped only at a genuinely unsupported physical edge end. If a retained cell
+lacks a reachable predecessor in the previous height band, the planner restores
+the smallest recursive support chain from the side-valid field. The first side
 Byte keeps the seed height; every later half-cell lowers the selected octant by
 one vertical half-cell. Maximum reach is
 `2 * ((rollerFillDepth + 1) / 2)` half-cells, matching Create's whole-block

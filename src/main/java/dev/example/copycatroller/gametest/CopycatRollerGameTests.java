@@ -1798,6 +1798,89 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void preciseSamplerMergesAdjacentEdgeCaptures(
+        GameTestHelper helper
+    ) {
+        Level level = helper.getLevel();
+        Vec3 first = Vec3.atCenterOf(helper.absolutePos(new BlockPos(2, 8, 2)));
+        Vec3 middle = first.add(0, 0, 6);
+        Vec3 last = middle.add(6, 1, 0);
+        TrackGraph graph = new TrackGraph();
+        TrackNode firstNode = node(level, first, 121);
+        TrackNode middleNode = node(level, middle, 122);
+        TrackNode lastNode = node(level, last, 123);
+        TrackEdge firstEdge = new TrackEdge(
+            firstNode,
+            middleNode,
+            null,
+            TrackMaterial.ANDESITE
+        );
+        TrackEdge secondEdge = new TrackEdge(
+            middleNode,
+            lastNode,
+            null,
+            TrackMaterial.ANDESITE
+        );
+        PaveTask task = new PaveTask(0, 0);
+        TrackPaverV2.pave(task, graph, firstEdge, 0, firstEdge.getLength());
+        TrackPaverV2.pave(task, graph, secondEdge, 0, secondEdge.getLength());
+
+        assertCapturedCoverage(helper, task);
+        List<TrackSurfaceSample> samples =
+            PreciseTrackHeightSampler.samples(task, 0);
+        check(
+            helper,
+            samples.stream().map(TrackSurfaceSample::sectionKey).distinct().count() == 2,
+            "adjacent track edges did not retain separate capture identities"
+        );
+        var window = PreciseTrackHeightSampler.samplesWithHalo(task, 0, 2);
+        check(
+            helper,
+            samples.stream().allMatch(window::isCore),
+            "multi-edge halo lost writable core columns"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void shortTrackProfileGetsReadOnlyLongitudinalHalo(
+        GameTestHelper helper
+    ) {
+        Level level = helper.getLevel();
+        Vec3 first = Vec3.atCenterOf(helper.absolutePos(new BlockPos(2, 8, 2)));
+        Vec3 second = first.add(0, 0, 12);
+        TrackGraph graph = new TrackGraph();
+        TrackEdge edge = new TrackEdge(
+            node(level, first, 111),
+            node(level, second, 112),
+            null,
+            TrackMaterial.ANDESITE
+        );
+        PaveTask task = new PaveTask(0, 0);
+        TrackPaverV2.pave(task, graph, edge, 4, 6);
+        List<TrackSurfaceSample> core =
+            PreciseTrackHeightSampler.samples(task, 0);
+        var window = PreciseTrackHeightSampler.samplesWithHalo(task, 0, 3);
+
+        check(helper, !core.isEmpty(), "short Create profile was empty");
+        check(
+            helper,
+            window.samples().size() > core.size(),
+            "profile halo did not add longitudinal context"
+        );
+        check(
+            helper,
+            window.samples().stream().anyMatch(window::isCore),
+            "profile halo lost its writable core"
+        );
+        check(
+            helper,
+            window.samples().stream().anyMatch(sample -> !window.isCore(sample)),
+            "all halo samples incorrectly own world output"
+        );
+        helper.succeed();
+    }
+    @GameTest(template = "empty")
     public static void wideFillBytesRespectCombinedRollerFootprint(
         GameTestHelper helper
     ) {

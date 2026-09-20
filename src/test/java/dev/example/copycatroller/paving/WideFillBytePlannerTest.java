@@ -276,6 +276,33 @@ class WideFillBytePlannerTest {
     }
 
     @Test
+    void haloShapesTheEndsWithoutOwningWorldOutput() {
+        List<WideFillBytePlanner.Seed> seeds = List.of(
+            new WideFillBytePlanner.Seed(-2, 0, 0, 1, 0, false, true, false),
+            new WideFillBytePlanner.Seed(-1, 0, 0, 1, 0, false, true, false),
+            new WideFillBytePlanner.Seed(0, 0, 0, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(1, 0, 0, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(2, 0, 0, 1, 0, false, true, false),
+            new WideFillBytePlanner.Seed(3, 0, 0, 1, 0, false, true, false)
+        );
+
+        List<WideFillBytePlanner.ByteCell> cells =
+            WideFillBytePlanner.plan(seeds, 3);
+
+        assertFalse(cells.isEmpty());
+        assertTrue(cells.stream().allMatch(cell ->
+            cell.halfX() >= 0 && cell.halfX() <= 3
+        ));
+        for (int distance = 1; distance <= 6; distance++) {
+            int expectedDistance = distance;
+            assertTrue(cells.stream().anyMatch(cell ->
+                cell.distance() == expectedDistance
+            ));
+        }
+        assertEveryCellHasReachableParent(seeds, cells);
+    }
+
+    @Test
     void reachMatchesCreatesWideFillRadius() {
         assertEquals(0, WideFillBytePlanner.reachBlocksForCreateDepth(0));
         assertEquals(1, WideFillBytePlanner.reachBlocksForCreateDepth(1));

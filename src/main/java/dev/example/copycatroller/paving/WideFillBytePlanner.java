@@ -10,9 +10,9 @@ import java.util.Set;
 
 /**
  * Rasterizes selected lateral Wide Fill surfaces on the Copycat Byte grid.
- * Each output column is owned by its nearest track sample. Interior distance
- * contours remain continuous while unsupported ends of Create's short paving
- * profile are clipped before they can form transverse lobes.
+ * The union of every Roller profile defines the protected centre and only its
+ * real exterior boundary may emit. Each output column is owned by its nearest
+ * track sample; read-only halo sources shape the field but never own output.
  */
 public final class WideFillBytePlanner {
     private static final double HALF_GRID_EPSILON = 1.0e-7;
@@ -44,6 +44,11 @@ public final class WideFillBytePlanner {
         for (SourceVoxel source : sources) {
             footprint.add(source.column());
         }
+        sources = sources.stream()
+            .map(source -> isOutwardBoundary(source, footprint)
+                ? source
+                : source.withoutEmission())
+            .toList();
 
         int maximumHalfSteps = maximumReachBlocks * 2;
         Map<HalfColumn, NearestSource> nearest = new HashMap<>();
@@ -133,6 +138,9 @@ public final class WideFillBytePlanner {
         for (Map.Entry<HalfColumn, NearestSource> entry : selected.entrySet()) {
             HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
+            if (!owner.source().outputOwner()) {
+                continue;
+            }
             ordered.add(new ByteCell(
                 column.x(),
                 outputLowerHalfY(owner),
@@ -268,6 +276,9 @@ public final class WideFillBytePlanner {
             if (candidate.column().equals(source.column())) {
                 continue;
             }
+            if (!sharesEmittingSide(source, candidate)) {
+                continue;
+            }
             int offsetX = candidate.column().x() - source.column().x();
             int offsetZ = candidate.column().z() - source.column().z();
             double along = (
@@ -285,6 +296,50 @@ public final class WideFillBytePlanner {
         return false;
     }
 
+    private static boolean sharesEmittingSide(
+        SourceVoxel first,
+        SourceVoxel second
+    ) {
+        return first.allowNegativeLateral() && second.allowNegativeLateral()
+            || first.allowPositiveLateral() && second.allowPositiveLateral();
+    }
+
+    private static boolean isOutwardBoundary(
+        SourceVoxel source,
+        Set<HalfColumn> footprint
+    ) {
+        if (!source.allowNegativeLateral()
+            && !source.allowPositiveLateral()) {
+            return false;
+        }
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                if (offsetX == 0 && offsetZ == 0) {
+                    continue;
+                }
+                HalfColumn neighbour = new HalfColumn(
+                    source.column().x() + offsetX,
+                    source.column().z() + offsetZ
+                );
+                if (footprint.contains(neighbour)) {
+                    continue;
+                }
+                double side = offsetX * source.normalX()
+                    + offsetZ * source.normalZ();
+                double along = offsetX * -source.normalZ()
+                    + offsetZ * source.normalX();
+                boolean allowedSide = side > SIDE_EPSILON
+                    ? source.allowPositiveLateral()
+                    : side < -SIDE_EPSILON
+                        && source.allowNegativeLateral();
+                if (allowedSide
+                    && Math.abs(side) + SIDE_EPSILON >= Math.abs(along)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
     public static List<HalfVoxel> seedVoxels(List<Seed> seeds) {
         Set<HalfVoxel> result = new HashSet<>();
         for (SourceVoxel source : sources(seeds)) {
@@ -315,7 +370,8 @@ public final class WideFillBytePlanner {
                         normalX,
                         normalZ,
                         seed.allowNegativeLateral(),
-                        seed.allowPositiveLateral()
+                        seed.allowPositiveLateral(),
+                        seed.outputOwner()
                     ));
                 }
             }
@@ -365,8 +421,58 @@ public final class WideFillBytePlanner {
         double normalX,
         double normalZ,
         boolean allowNegativeLateral,
-        boolean allowPositiveLateral
+        boolean allowPositiveLateral,
+        boolean outputOwner
     ) {
+        public Seed(
+            int blockX,
+            int blockZ,
+            double surfaceY,
+            double tangentX,
+            double tangentZ,
+            double normalX,
+            double normalZ,
+            boolean allowNegativeLateral,
+            boolean allowPositiveLateral
+        ) {
+            this(
+                blockX,
+                blockZ,
+                surfaceY,
+                tangentX,
+                tangentZ,
+                normalX,
+                normalZ,
+                allowNegativeLateral,
+                allowPositiveLateral,
+                true
+            );
+        }
+
+        public Seed(
+            int blockX,
+            int blockZ,
+            double surfaceY,
+            double tangentX,
+            double tangentZ,
+            boolean allowNegativeLateral,
+            boolean allowPositiveLateral,
+            boolean outputOwner
+        ) {
+            this(
+                blockX,
+                blockZ,
+                surfaceY,
+                tangentX,
+                tangentZ,
+                -tangentZ,
+                tangentX,
+                allowNegativeLateral,
+                allowPositiveLateral,
+                outputOwner
+            );
+        }
+
         public Seed(
             int blockX,
             int blockZ,
@@ -382,10 +488,9 @@ public final class WideFillBytePlanner {
                 surfaceY,
                 tangentX,
                 tangentZ,
-                -tangentZ,
-                tangentX,
                 allowNegativeLateral,
-                allowPositiveLateral
+                allowPositiveLateral,
+                true
             );
         }
 
@@ -451,8 +556,20 @@ public final class WideFillBytePlanner {
         double normalX,
         double normalZ,
         boolean allowNegativeLateral,
-        boolean allowPositiveLateral
+        boolean allowPositiveLateral,
+        boolean outputOwner
     ) {
+        private SourceVoxel withoutEmission() {
+            return new SourceVoxel(
+                column,
+                lowerHalfY,
+                normalX,
+                normalZ,
+                false,
+                false,
+                outputOwner
+            );
+        }
     }
 
     private record NearestSource(
