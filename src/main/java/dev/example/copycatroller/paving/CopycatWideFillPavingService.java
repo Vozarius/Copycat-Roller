@@ -2,6 +2,7 @@ package dev.example.copycatroller.paving;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -18,6 +19,7 @@ import dev.example.copycatroller.paving.WideFillBytePlanner.HalfVoxel;
 import dev.example.copycatroller.paving.WideFillBytePlanner.Seed;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
@@ -43,6 +45,97 @@ public final class CopycatWideFillPavingService {
             return false;
         }
 
+        PavingPlan plan = planned(
+            context,
+            fallbackPosition,
+            trackProfile,
+            profileProvider
+        );
+        if (plan.cells().isEmpty()) {
+            return false;
+        }
+        IItemHandler inventory = context.contraption.getStorage().getAllItems();
+        Set<HalfVoxel> reached = new HashSet<>(
+            WideFillBytePlanner.seedVoxels(plan.seeds())
+        );
+        boolean changed = false;
+        for (ByteCell cell : plan.cells()) {
+            if (!hasReachableParent(cell, reached)) {
+                continue;
+            }
+
+            BlockPos position = blockPosition(cell);
+            CopycatByteBlock.Byte bite = byteForCell(cell);
+            PlacementResult result = CopycatLayerPavingService.tryPlaceWithZinc(
+                context.world,
+                position,
+                CopycatPavingMaterial.BYTE,
+                CopycatLayerPavingService.byteStateFor(Set.of(bite)),
+                inventory
+            );
+            if (result != PlacementResult.FAIL) {
+                reached.add(cell.voxel());
+            }
+            changed |= result == PlacementResult.SUCCESS;
+        }
+        return changed;
+    }
+
+    /**
+     * Computes the cells that zinc edge Rollers will occupy before ordinary
+     * Wide Fill actors run. Reserving this mask makes actor iteration order
+     * irrelevant: a material Roller cannot pave a full block into a Byte cell
+     * that an edge Roller is about to create.
+     */
+    public static Set<BlockPos> plannedByteProtectionForZincRollers(
+        MovementContext reference,
+        BlockPos fallbackPosition,
+        TrackProfileProvider profileProvider
+    ) {
+        if (reference.world.isClientSide || reference.contraption == null) {
+            return Set.of();
+        }
+        Direction facing = reference.state.getValue(RollerBlock.FACING);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        for (MovementContext actor : reference.contraption.getActors().stream()
+            .map(pair -> pair.getRight())
+            .filter(actor -> actor.state.getBlock() instanceof RollerBlock)
+            .filter(actor -> !actor.disabled)
+            .filter(actor -> actor.state.getValue(RollerBlock.FACING) == facing)
+            .filter(actor -> RollerModeGate.isWideFill(actor.blockEntityData))
+            .filter(actor -> CopycatLayerPavingService.isZincIngot(
+                ItemStack.parseOptional(
+                    reference.world.registryAccess(),
+                    actor.blockEntityData.getCompound("Filter")
+                )
+            ))
+            .toList()) {
+            PaveTask profile = profileProvider.create(actor);
+            BlockPos actorFallback = fallbackForActor(
+                reference,
+                actor,
+                fallbackPosition
+            );
+            for (ByteCell cell : planned(
+                actor,
+                actorFallback,
+                profile,
+                profileProvider
+            ).cells()) {
+                BlockPos position = blockPosition(cell);
+                positions.add(position);
+                positions.add(position.above());
+            }
+        }
+        return Set.copyOf(positions);
+    }
+
+    private static PavingPlan planned(
+        MovementContext context,
+        BlockPos fallbackPosition,
+        @Nullable PaveTask trackProfile,
+        TrackProfileProvider profileProvider
+    ) {
         Direction localFacing = context.state.getValue(RollerBlock.FACING);
         // Build the complete row footprint synchronously. No MovementContext,
         // Level, or contraption reference escapes this invocation.
@@ -72,7 +165,7 @@ public final class CopycatWideFillPavingService {
             rowPositions
         );
         if (!edges.hasOuterSide()) {
-            return false;
+            return PavingPlan.EMPTY;
         }
 
         Direction clockwise = localFacing.getClockWise();
@@ -113,7 +206,7 @@ public final class CopycatWideFillPavingService {
             .findFirst()
             .orElse(null);
         if (currentProfile == null) {
-            return false;
+            return PavingPlan.EMPTY;
         }
         RollerProfile inwardProfile = inwardProfile(
             currentProfile,
@@ -186,46 +279,44 @@ public final class CopycatWideFillPavingService {
             }
         }
         if (seeds.isEmpty()) {
-            return false;
+            return PavingPlan.EMPTY;
         }
-        List<ByteCell> cells = WideFillBytePlanner.plan(seeds, reach);
-        if (cells.isEmpty()) {
-            return false;
-        }
-
-        IItemHandler inventory = context.contraption.getStorage().getAllItems();
-        Set<HalfVoxel> reached = new HashSet<>(
-            WideFillBytePlanner.seedVoxels(seeds)
+        return new PavingPlan(
+            List.copyOf(seeds),
+            WideFillBytePlanner.plan(seeds, reach)
         );
-        boolean changed = false;
-        for (ByteCell cell : cells) {
-            if (!hasReachableParent(cell, reached)) {
-                continue;
-            }
+    }
 
-            BlockPos position = new BlockPos(
-                Math.floorDiv(cell.halfX(), 2),
-                Math.floorDiv(cell.lowerHalfY(), 2),
-                Math.floorDiv(cell.halfZ(), 2)
-            );
-            CopycatByteBlock.Byte bite = CopycatByteBlock.bite(
-                Math.floorMod(cell.halfX(), 2) == 1,
-                Math.floorMod(cell.lowerHalfY(), 2) == 1,
-                Math.floorMod(cell.halfZ(), 2) == 1
-            );
-            PlacementResult result = CopycatLayerPavingService.tryPlaceWithZinc(
-                context.world,
-                position,
-                CopycatPavingMaterial.BYTE,
-                CopycatLayerPavingService.byteStateFor(Set.of(bite)),
-                inventory
-            );
-            if (result != PlacementResult.FAIL) {
-                reached.add(cell.voxel());
-            }
-            changed |= result == PlacementResult.SUCCESS;
-        }
-        return changed;
+    private static BlockPos fallbackForActor(
+        MovementContext reference,
+        MovementContext actor,
+        BlockPos referenceFallback
+    ) {
+        BlockPos localDelta = actor.localPos.subtract(reference.localPos);
+        Vec3 worldDelta = reference.rotation.apply(
+            Vec3.atLowerCornerOf(localDelta)
+        );
+        return BlockPos.containing(
+            referenceFallback.getX() + worldDelta.x,
+            referenceFallback.getY() + worldDelta.y,
+            referenceFallback.getZ() + worldDelta.z
+        );
+    }
+
+    private static BlockPos blockPosition(ByteCell cell) {
+        return new BlockPos(
+            Math.floorDiv(cell.halfX(), 2),
+            Math.floorDiv(cell.lowerHalfY(), 2),
+            Math.floorDiv(cell.halfZ(), 2)
+        );
+    }
+
+    private static CopycatByteBlock.Byte byteForCell(ByteCell cell) {
+        return CopycatByteBlock.bite(
+            Math.floorMod(cell.halfX(), 2) == 1,
+            Math.floorMod(cell.lowerHalfY(), 2) == 1,
+            Math.floorMod(cell.halfZ(), 2) == 1
+        );
     }
 
     private static boolean sameRow(
@@ -370,23 +461,30 @@ public final class CopycatWideFillPavingService {
         ByteCell cell,
         Set<HalfVoxel> reached
     ) {
-        int parentY = cell.distance() == 1
-            ? cell.lowerHalfY()
-            : cell.lowerHalfY() + 1;
         for (int offsetX = -1; offsetX <= 1; offsetX++) {
             for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                if (reached.contains(new HalfVoxel(
-                    cell.halfX() + offsetX,
-                    parentY,
-                    cell.halfZ() + offsetZ
-                ))) {
-                    return true;
+                for (int parentY = cell.lowerHalfY();
+                     parentY <= cell.lowerHalfY() + 1;
+                     parentY++) {
+                    if (reached.contains(new HalfVoxel(
+                        cell.halfX() + offsetX,
+                        parentY,
+                        cell.halfZ() + offsetZ
+                    ))) {
+                        return true;
+                    }
                 }
             }
         }
         return false;
     }
 
+    private record PavingPlan(List<Seed> seeds, List<ByteCell> cells) {
+        private static final PavingPlan EMPTY = new PavingPlan(
+            List.of(),
+            List.of()
+        );
+    }
     private record RollerProfile(
         boolean current,
         int localLateral,

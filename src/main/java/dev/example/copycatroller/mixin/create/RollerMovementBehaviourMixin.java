@@ -86,11 +86,15 @@ public abstract class RollerMovementBehaviourMixin {
             return;
         }
 
-        if (!RollerModeGate.isStraightFill(context.blockEntityData)) {
-            return;
-        }
+        boolean straightFill = RollerModeGate.isStraightFill(
+            context.blockEntityData
+        );
+        boolean wideFill = RollerModeGate.isWideFill(context.blockEntityData);
 
         if (material.isPresent() || zincMode) {
+            if (!straightFill) {
+                return;
+            }
             callback.cancel();
             if (context.world.isClientSide) {
                 return;
@@ -115,18 +119,42 @@ public abstract class RollerMovementBehaviourMixin {
             return;
         }
 
-        if (filter.isEmpty() || context.contraption == null) {
+        if ((!straightFill && !wideFill)
+            || filter.isEmpty()
+            || context.contraption == null) {
             return;
         }
 
         PaveTask trackProfile = createHeightProfileForTracks(context);
-        MaterialFillPlan plan =
-            CopycatMaterialFillingService.planPassForAnyFilter(
+        MaterialFillPlan profilePlan = wideFill
+            ? CopycatMaterialFillingService.planWidePassForAnyFilter(
+                context.world,
+                position,
+                trackProfile,
+                context.localPos.getY()
+            )
+            : CopycatMaterialFillingService.planPassForAnyFilter(
                 context.world,
                 position,
                 trackProfile,
                 context.localPos.getY()
             );
+        MaterialFillPlan plan = MaterialFillPlan.combine(
+            CopycatMaterialFillingService.planBytesUnderRoller(
+                context.world,
+                position
+            ),
+            profilePlan
+        );
+        if (wideFill) {
+            plan = plan.protecting(
+                CopycatWideFillPavingService.plannedByteProtectionForZincRollers(
+                    context,
+                    position,
+                    this::createHeightProfileForTracks
+                )
+            );
+        }
         if (plan.isEmpty()) {
             return;
         }
@@ -191,8 +219,8 @@ public abstract class RollerMovementBehaviourMixin {
 
     /**
      * The second tryFill invocation is Create's full-block base attempt. When
-     * that cell is occupied by the selected full Copycat, move only this
-     * attempt one block down so the Roller can create its support.
+     * a selected Copycat owns that paving column, move only this attempt below
+     * the Copycat so Create can retain its normal support-placement behavior.
      */
     @ModifyArg(
         method = "triggerPaver(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;"

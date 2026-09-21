@@ -17,15 +17,15 @@ Release verification environment:
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-The final version 1.1 build completed successfully. All 47 unit tests passed
+The final version 2.0 build completed successfully. All 51 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
-loaded Copycat Roller 1.1, Create 6, and Copycats+ 3.0.9, then passed all
-61/61 required GameTests in 1.138 seconds. The server run also verifies that
+loaded Copycat Roller 2.0, Create 6, and Copycats+ 3.0.9, then passed all
+65/65 required GameTests in 1.784 seconds. The server run also verifies that
 common code does not load client-only classes.
 
-The final build took 13 seconds; the dedicated GameTest run took 31 seconds.
+The final clean build took 18 seconds; the dedicated GameTest run took 44 seconds.
 
-## Version 1.1 coverage
+## Version 2.0 coverage
 
 The new unit tests verify:
 
@@ -44,6 +44,8 @@ The new unit tests verify:
 - station correspondence wins over a spatially nearer rounded cell from a
   different longitudinal section;
 - read-only halo seeds shape a complete contour but never own world output;
+- writable height-changing bands retain every core cell even when a halo source
+  is geometrically nearer, and remain connected across half-block transitions;
 - adjacent track edges sharing one Create `PaveTask` retain separate section
   identities, so equal local station values cannot select the wrong side;
 - only sources on the exterior boundary of the combined Roller footprint emit;
@@ -54,7 +56,10 @@ The new unit tests verify:
 - every planned Byte has a reachable predecessor in the prior height band;
 - every half-block distance band exists at its own height and a quarter-turn
   surface remains connected through the half-cell diagonal rasterization;
-- negative coordinates and a half-block track rise are rasterized correctly.
+- negative coordinates and a half-block track rise are rasterized correctly;
+- ordinary material filling reproduces Create's exact `WIDE_FILL` Manhattan
+  diamond at every depth, retains the fractional top sample, and floors
+  negative world heights correctly.
 
 The new GameTests verify:
 
@@ -75,7 +80,19 @@ The new GameTests verify:
 - two adjacent real `TrackEdge` calls can append to one `PaveTask` without
   losing precise samples, confusing their stations, or crashing the server;
 - Create Creative Crates supply Copycat shapes, zinc conversion, and material
-  filling without changing their infinite source stack.
+  filling without changing their infinite source stack;
+- a descending slope Byte is found throughout Create's configured fill depth,
+  filled exactly once, owns the paving column above it, and redirects Create's
+  ordinary support target directly beneath it;
+- ordinary block filters find slope Bytes at exact and one-block-lower Wide
+  Fill targets and protect the cells above them;
+- a real `RollerMovementBehaviour.triggerPaver` call in `WIDE_FILL` fills slope
+  Bytes, including one above Create's normal paving point, keeps protected upper
+  cells empty, and still lets Create pave an ordinary target in the same pass;
+- one material Roller fills every Byte in its real vertical work column, charges
+  each part, and redirects support below the deepest selected Byte;
+- a material Roller in a separate trailing row reserves the complete future
+  Byte mask of every zinc row, including the cells above the planned Bytes.
 
 The existing suite still covers precise straight, diagonal, and Bezier track
 profiles, Layer/Half Layer/Slope Layer geometry, atomic inventory handling,
@@ -85,10 +102,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-1.1.jar` — 161,005 bytes
-  - SHA-256: `4DBECF46430353E1778B06D8B8AE7608234D8A86A010047108D0A67C72FE002C`
-- `build/libs/copycat_roller-1.1-sources.jar` — 64,563 bytes
-  - SHA-256: `19A445EF85865E6E04438E0C0F71CA1613AFB2E2B18DA6660D3EC598C3314537`
+- `build/libs/copycat_roller-2.0.jar` — 172,901 bytes
+  - SHA-256: `87C593F081509B3B73FE33C0A8F549B284C7DA2906A74D81437AD59828438011`
+- `build/libs/copycat_roller-2.0-sources.jar` — 69,359 bytes
+  - SHA-256: `B0C73476E73809A3845F2AD3F175E024E1065948D990B49E55110595E675CB1E`
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this

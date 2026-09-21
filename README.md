@@ -37,9 +37,14 @@ Reach matches Create's normal Wide Fill radius, and obstacles stop only the
 affected branch.
 
 An ordinary block filter fills empty parts of existing Copycats with that
-material and still paves non-Copycat positions through Create. Compatible
-third-party filters are resolved from the block they actually choose for each
-position.
+material in both Fill and Wide Fill, and still paves non-Copycat positions
+through Create. Every pass scans the Roller's real vertical work column, from
+the cell immediately below its body through the full `rollerFillDepth`, and
+fills every Copycat Byte it finds. In Wide Fill, the future Byte cells of all
+zinc Roller rows—and the cells directly above them—are reserved before normal
+Create paving, so actor order cannot turn a slope gap into a full block.
+Compatible third-party filters are resolved from the block they actually choose
+for each position.
 
 ## Item use
 
@@ -61,7 +66,7 @@ block materials. Player-assigned Copycat materials are never overwritten.
 - Copycats+ 3.0.x (tested with 3.0.9)
 - Java 21
 
-Install the dependencies and place `copycat_roller-1.1.jar` in the `mods`
+Install the dependencies and place `copycat_roller-2.0.jar` in the `mods`
 folder on both client and server.
 
 ## Configuration

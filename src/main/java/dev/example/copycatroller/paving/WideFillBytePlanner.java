@@ -52,6 +52,7 @@ public final class WideFillBytePlanner {
 
         int maximumHalfSteps = maximumReachBlocks * 2;
         Map<HalfColumn, NearestSource> nearest = new HashMap<>();
+        Map<HalfColumn, NearestSource> writableNearest = new HashMap<>();
         for (SourceVoxel source : sources) {
             for (int offsetX = -maximumHalfSteps;
                  offsetX <= maximumHalfSteps;
@@ -97,6 +98,18 @@ public final class WideFillBytePlanner {
                         candidate,
                         WideFillBytePlanner::nearer
                     );
+                    if (source.outputOwner()
+                        && Math.abs(along) <= 0.75 + HALF_GRID_EPSILON
+                        && Math.abs(side) > SIDE_EPSILON
+                        && (side > 0
+                            ? source.allowPositiveLateral()
+                            : source.allowNegativeLateral())) {
+                        writableNearest.merge(
+                            column,
+                            candidate,
+                            WideFillBytePlanner::nearer
+                        );
+                    }
                 }
             }
         }
@@ -134,13 +147,39 @@ public final class WideFillBytePlanner {
             }
         }
 
-        List<ByteCell> ordered = new ArrayList<>(selected.size());
-        for (Map.Entry<HalfColumn, NearestSource> entry : selected.entrySet()) {
+        Map<HalfColumn, NearestSource> writableAllowed = new HashMap<>();
+        Map<HalfColumn, NearestSource> writableSelected = new HashMap<>();
+        for (Map.Entry<HalfColumn, NearestSource> entry : allowed.entrySet()) {
+            NearestSource writer = writableNearest.get(entry.getKey());
+            if (writer != null
+                && writer.distance() == entry.getValue().distance()) {
+                writableAllowed.put(entry.getKey(), entry.getValue());
+                if (selected.containsKey(entry.getKey())) {
+                    writableSelected.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+        List<Map.Entry<HalfColumn, NearestSource>> writableInitial =
+            new ArrayList<>(writableSelected.entrySet());
+        writableInitial.sort(Comparator.comparingInt(
+            entry -> entry.getValue().distance()
+        ));
+        for (Map.Entry<HalfColumn, NearestSource> entry : writableInitial) {
+            if (!ensureSupported(
+                entry.getKey(),
+                entry.getValue(),
+                writableSelected,
+                writableAllowed,
+                sources
+            )) {
+                writableSelected.remove(entry.getKey());
+            }
+        }
+
+        List<ByteCell> ordered = new ArrayList<>(writableSelected.size());
+        for (Map.Entry<HalfColumn, NearestSource> entry : writableSelected.entrySet()) {
             HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
-            if (!owner.source().outputOwner()) {
-                continue;
-            }
             ordered.add(new ByteCell(
                 column.x(),
                 outputLowerHalfY(owner),
@@ -171,14 +210,14 @@ public final class WideFillBytePlanner {
             return true;
         }
 
-        int requiredY = outputLowerHalfY(owner) + 1;
+        int childY = outputLowerHalfY(owner);
         for (int offsetX = -1; offsetX <= 1; offsetX++) {
             for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
                 NearestSource parent = selected.get(new HalfColumn(
                     column.x() + offsetX,
                     column.z() + offsetZ
                 ));
-                if (isParent(parent, owner.distance() - 1, requiredY)) {
+                if (isParent(parent, owner.distance() - 1, childY)) {
                     return true;
                 }
             }
@@ -193,7 +232,7 @@ public final class WideFillBytePlanner {
                     column.z() + offsetZ
                 );
                 NearestSource candidate = allowed.get(candidateColumn);
-                if (!isParent(candidate, owner.distance() - 1, requiredY)
+                if (!isParent(candidate, owner.distance() - 1, childY)
                     || !betterSupport(candidate, best, sources)) {
                     continue;
                 }
@@ -218,11 +257,12 @@ public final class WideFillBytePlanner {
     private static boolean isParent(
         NearestSource candidate,
         int distance,
-        int lowerHalfY
+        int childLowerHalfY
     ) {
         return candidate != null
             && candidate.distance() == distance
-            && outputLowerHalfY(candidate) == lowerHalfY;
+            && outputLowerHalfY(candidate) >= childLowerHalfY
+            && outputLowerHalfY(candidate) <= childLowerHalfY + 1;
     }
 
     private static boolean betterSupport(

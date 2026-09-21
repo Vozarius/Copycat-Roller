@@ -303,6 +303,45 @@ class WideFillBytePlannerTest {
     }
 
     @Test
+    void heightChangesCannotPunchHolesInWritableBands() {
+        List<WideFillBytePlanner.Seed> seeds = List.of(
+            new WideFillBytePlanner.Seed(-2, 0, -0.5, 1, 0, false, true, false),
+            new WideFillBytePlanner.Seed(-1, 0, 0.0, 1, 0, false, true, false),
+            new WideFillBytePlanner.Seed(0, 0, 0.0, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(1, 0, 0.5, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(2, 0, 0.5, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(3, 0, 1.0, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(4, 0, 1.5, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(5, 0, 1.5, 1, 0, false, true, true),
+            new WideFillBytePlanner.Seed(6, 0, 2.0, 1, 0, false, true, false),
+            new WideFillBytePlanner.Seed(7, 0, 2.0, 1, 0, false, true, false)
+        );
+        List<WideFillBytePlanner.ByteCell> cells =
+            WideFillBytePlanner.plan(seeds, 3);
+
+        for (int distance = 1; distance <= 6; distance++) {
+            int expectedDistance = distance;
+            List<WideFillBytePlanner.ByteCell> band = cells.stream()
+                .filter(cell -> cell.distance() == expectedDistance)
+                .toList();
+            for (int halfX = 0; halfX <= 11; halfX++) {
+                int expectedHalfX = halfX;
+                assertTrue(
+                    band.stream().anyMatch(cell ->
+                        cell.halfX() == expectedHalfX
+                    ),
+                    "height transition left a hole at band "
+                        + distance + ", halfX " + halfX
+                );
+            }
+            assertEightConnected(
+                band,
+                "height-changing writable band is disconnected " + distance
+            );
+        }
+        assertEveryCellHasReachableParent(seeds, cells);
+    }
+    @Test
     void reachMatchesCreatesWideFillRadius() {
         assertEquals(0, WideFillBytePlanner.reachBlocksForCreateDepth(0));
         assertEquals(1, WideFillBytePlanner.reachBlocksForCreateDepth(1));
@@ -338,19 +377,20 @@ class WideFillBytePlannerTest {
             WideFillBytePlanner.seedVoxels(seeds)
         );
         for (WideFillBytePlanner.ByteCell cell : cells) {
-            int parentY = cell.distance() == 1
-                ? cell.lowerHalfY()
-                : cell.lowerHalfY() + 1;
             boolean parentFound = false;
             for (int offsetX = -1; offsetX <= 1 && !parentFound; offsetX++) {
-                for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                    if (reached.contains(new WideFillBytePlanner.HalfVoxel(
-                        cell.halfX() + offsetX,
-                        parentY,
-                        cell.halfZ() + offsetZ
-                    ))) {
-                        parentFound = true;
-                        break;
+                for (int offsetZ = -1; offsetZ <= 1 && !parentFound; offsetZ++) {
+                    for (int parentY = cell.lowerHalfY();
+                         parentY <= cell.lowerHalfY() + 1;
+                         parentY++) {
+                        if (reached.contains(new WideFillBytePlanner.HalfVoxel(
+                            cell.halfX() + offsetX,
+                            parentY,
+                            cell.halfZ() + offsetZ
+                        ))) {
+                            parentFound = true;
+                            break;
+                        }
                     }
                 }
             }

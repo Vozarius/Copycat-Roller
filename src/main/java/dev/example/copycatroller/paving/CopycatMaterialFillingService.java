@@ -1,6 +1,8 @@
 package dev.example.copycatroller.paving;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -9,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import com.copycatsplus.copycats.content.copycat.bytes.CopycatByteBlock;
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlock;
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlockEntity;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlock;
@@ -17,6 +20,7 @@ import com.copycatsplus.copycats.foundation.copycat.multistate.MaterialItemStora
 import com.copycatsplus.copycats.foundation.copycat.multistate.MaterialItemStorage.MaterialItem;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.foundation.item.ItemHelper;
+import com.simibubi.create.infrastructure.config.AllConfigs;
 import dev.example.copycatroller.CopycatRoller;
 import dev.example.copycatroller.CopycatRollerConfig;
 import net.minecraft.core.BlockPos;
@@ -120,6 +124,66 @@ public final class CopycatMaterialFillingService {
     }
 
     /**
+     * Builds the material plan for the complete block-cell raster visited by
+     * Create's Wide Fill depth loop. Unlike the straight-fill search, every
+     * generated sample already represents one exact Create target, so a Byte
+     * needs to be at most one block below that target.
+     */
+    public static MaterialFillPlan planWidePassForAnyFilter(
+        Level level,
+        BlockPos fallbackPosition,
+        @Nullable PaveTask trackProfile,
+        int rollerLocalY
+    ) {
+        List<TrackSurfaceSample> centerline = trackProfile == null
+            ? List.of(new TrackSurfaceSample(
+                fallbackPosition.getX(),
+                fallbackPosition.getZ(),
+                fallbackPosition.getY()
+            ))
+            : PreciseTrackHeightSampler.samples(trackProfile, rollerLocalY);
+        List<TrackSurfaceSample> targets = WideFillTargetPlanner.expand(
+            centerline,
+            AllConfigs.server().kinetics.rollerFillDepth.get()
+        );
+        return planSamplesForAnyFilter(level, targets, MAX_SURFACE_GAP);
+    }
+
+    /**
+     * Finds every Copycat Byte in the real vertical work column of this
+     * Roller. Create's active position is two blocks below the Roller, so the
+     * cell immediately above it is still physically below the actor and must
+     * be included. This scan deliberately does not apply track-surface
+     * tolerances: a stepped Byte slope may sit above or below the quantized
+     * rail profile while still being directly under the Roller.
+     */
+    public static MaterialFillPlan planBytesUnderRoller(
+        Level level,
+        BlockPos activePosition
+    ) {
+        int minimumY = activePosition.getY()
+            - AllConfigs.server().kinetics.rollerFillDepth.get();
+        int maximumY = activePosition.getY() + 1;
+        List<SurfaceTarget> targets = new ArrayList<>();
+        for (int y = maximumY; y >= minimumY; y--) {
+            BlockPos position = new BlockPos(
+                activePosition.getX(),
+                y,
+                activePosition.getZ()
+            );
+            if (!level.isLoaded(position)
+                || !(level.getBlockState(position).getBlock()
+                    instanceof CopycatByteBlock)) {
+                continue;
+            }
+            targets.add(new SurfaceTarget(position, activePosition));
+        }
+        return targets.isEmpty()
+            ? MaterialFillPlan.EMPTY
+            : new MaterialFillPlan(targets);
+    }
+
+    /**
      * Applies one ordinary material filter to the closest Copycat surface in
      * every sampled X/Z column.
      */
@@ -148,6 +212,18 @@ public final class CopycatMaterialFillingService {
         Level level,
         List<TrackSurfaceSample> samples
     ) {
+        return planSamplesForAnyFilter(
+            level,
+            samples,
+            AllConfigs.server().kinetics.rollerFillDepth.get() + 1.0
+        );
+    }
+
+    private static MaterialFillPlan planSamplesForAnyFilter(
+        Level level,
+        List<TrackSurfaceSample> samples,
+        double maximumByteGap
+    ) {
         if (samples.isEmpty()) {
             return MaterialFillPlan.EMPTY;
         }
@@ -156,8 +232,16 @@ public final class CopycatMaterialFillingService {
         samples.stream()
             .sorted(Comparator
                 .comparingInt(TrackSurfaceSample::x)
-                .thenComparingInt(TrackSurfaceSample::z))
-            .forEach(sample -> closestSurfaceCopycat(level, sample)
+                .thenComparingInt(TrackSurfaceSample::z)
+                .thenComparing(
+                    TrackSurfaceSample::surfaceY,
+                    Comparator.reverseOrder()
+                ))
+            .forEach(sample -> closestSurfaceCopycat(
+                level,
+                sample,
+                maximumByteGap
+            )
                 .ifPresent(copycatPosition -> targetsByCopycat.putIfAbsent(
                     copycatPosition,
                     new SurfaceTarget(
@@ -202,7 +286,8 @@ public final class CopycatMaterialFillingService {
 
     private static Optional<BlockPos> closestSurfaceCopycat(
         Level level,
-        TrackSurfaceSample sample
+        TrackSurfaceSample sample,
+        double maximumByteGap
     ) {
         double expectedMinimumTop = sample.minimumCellSurfaceY() + 1.0;
         double expectedMaximumTop = sample.maximumCellSurfaceY() + 1.0;
@@ -212,11 +297,16 @@ public final class CopycatMaterialFillingService {
 
         /*
          * The precise profile describes Create's base block while surface-only
-         * Copycats normally occupy the cell above it. Looking two cells down
-         * also covers a full supporting Copycat without reaching decorative
-         * blocks farther below the track.
+         * Copycats normally occupy the cell above it. Ordinary Copycats keep
+         * the narrow surface tolerance, while slope Bytes may descend through
+         * Create's configured fill depth and still belong to this column.
          */
-        for (int y = centerY - 2; y <= centerY; y++) {
+        int fillDepth = AllConfigs.server().kinetics.rollerFillDepth.get();
+        int searchDepth = Math.min(
+            fillDepth + 1,
+            (int) Math.ceil(maximumByteGap) + 1
+        );
+        for (int y = centerY - searchDepth; y <= centerY; y++) {
             BlockPos position = new BlockPos(sample.x(), y, sample.z());
             if (!level.isLoaded(position)) {
                 continue;
@@ -231,8 +321,11 @@ public final class CopycatMaterialFillingService {
                 continue;
             }
             double top = candidateTop.orElseThrow();
+            double maximumGap = state.getBlock() instanceof CopycatByteBlock
+                ? maximumByteGap
+                : MAX_SURFACE_GAP;
             if (top > expectedMaximumTop + SURFACE_EPSILON
-                || top < expectedMinimumTop - MAX_SURFACE_GAP - SURFACE_EPSILON) {
+                || top < expectedMinimumTop - maximumGap - SURFACE_EPSILON) {
                 continue;
             }
 
@@ -774,27 +867,53 @@ public final class CopycatMaterialFillingService {
         }
 
         public Optional<BlockPos> supportRedirect() {
-            return copycatPosition.equals(createBasePosition)
+            return copycatPosition.getY() <= createBasePosition.getY()
                 ? Optional.of(copycatPosition.below())
                 : Optional.empty();
         }
     }
 
     public static final class MaterialFillPlan {
-        public static final MaterialFillPlan EMPTY = new MaterialFillPlan(List.of());
+        public static final MaterialFillPlan EMPTY = new MaterialFillPlan(
+            List.of(),
+            Set.of()
+        );
         private final List<SurfaceTarget> targets;
         private final Set<BlockPos> protectedPositions;
         private final Map<BlockPos, BlockPos> baseRedirects;
 
         public MaterialFillPlan(List<SurfaceTarget> targets) {
+            this(targets, Set.of());
+        }
+
+        private MaterialFillPlan(
+            List<SurfaceTarget> targets,
+            Collection<BlockPos> additionallyProtected
+        ) {
             this.targets = List.copyOf(targets);
 
-            Set<BlockPos> protectedPositions = new LinkedHashSet<>();
+            Set<BlockPos> protectedPositions = new LinkedHashSet<>(
+                additionallyProtected
+            );
             Map<BlockPos, BlockPos> baseRedirects = new LinkedHashMap<>();
             for (SurfaceTarget target : this.targets) {
-                protectedPositions.add(target.copycatPosition());
+                BlockPos copycat = target.copycatPosition();
+                BlockPos base = target.createBasePosition();
+                for (int y = copycat.getY(); y <= base.getY() + 1; y++) {
+                    protectedPositions.add(new BlockPos(
+                        copycat.getX(),
+                        y,
+                        copycat.getZ()
+                    ));
+                }
                 target.supportRedirect().ifPresent(redirect ->
-                    baseRedirects.put(target.createBasePosition(), redirect)
+                    baseRedirects.merge(
+                        target.createBasePosition(),
+                        redirect,
+                        (first, second) -> first.getY() <= second.getY()
+                            ? first
+                            : second
+                    )
                 );
             }
             this.protectedPositions = Set.copyOf(protectedPositions);
@@ -806,7 +925,36 @@ public final class CopycatMaterialFillingService {
         }
 
         public boolean isEmpty() {
-            return targets.isEmpty();
+            return targets.isEmpty() && protectedPositions.isEmpty();
+        }
+
+        public MaterialFillPlan protecting(Collection<BlockPos> positions) {
+            if (positions.isEmpty()) {
+                return this;
+            }
+            Set<BlockPos> combined = new LinkedHashSet<>(protectedPositions);
+            combined.addAll(positions);
+            return new MaterialFillPlan(targets, combined);
+        }
+
+        public static MaterialFillPlan combine(MaterialFillPlan... plans) {
+            List<SurfaceTarget> targets = new ArrayList<>();
+            Set<BlockPos> protectedPositions = new LinkedHashSet<>();
+            Arrays.stream(plans).forEach(plan -> {
+                targets.addAll(plan.targets);
+                protectedPositions.addAll(plan.protectedPositions);
+            });
+            if (targets.isEmpty() && protectedPositions.isEmpty()) {
+                return EMPTY;
+            }
+            Map<BlockPos, SurfaceTarget> uniqueTargets = new LinkedHashMap<>();
+            for (SurfaceTarget target : targets) {
+                uniqueTargets.putIfAbsent(target.copycatPosition(), target);
+            }
+            return new MaterialFillPlan(
+                List.copyOf(uniqueTargets.values()),
+                protectedPositions
+            );
         }
 
         public boolean protects(BlockPos position) {
@@ -814,15 +962,14 @@ public final class CopycatMaterialFillingService {
         }
 
         /**
-         * A full Copycat occupying Create's base target redirects that one
-         * full-block attempt directly below the Copycat. Partial Copycats in
-         * the upper cell leave Create's base target unchanged.
+         * A selected Copycat at or below Create's base target owns the whole
+         * paving column, so the base attempt is redirected directly beneath
+         * it. A partial Copycat in the upper cell leaves the base unchanged.
          */
         public BlockPos redirectCreateBase(BlockPos position) {
             return baseRedirects.getOrDefault(position, position);
         }
     }
-
     private record SingleSnapshot(
         BlockState material,
         ItemStack consumedItem,

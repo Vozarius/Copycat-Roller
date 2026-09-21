@@ -914,6 +914,291 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void materialPlanFillsDeepByteAndOwnsItsPavingColumn(
+        GameTestHelper helper
+    ) {
+        BlockPos createBase = helper.absolutePos(new BlockPos(4, 8, 4));
+        BlockPos bytePosition = createBase.below(3);
+        BlockPos supportPosition = bytePosition.below();
+        for (int y = supportPosition.getY(); y <= createBase.getY() + 1; y++) {
+            helper.getLevel().setBlockAndUpdate(
+                new BlockPos(createBase.getX(), y, createBase.getZ()),
+                Blocks.AIR.defaultBlockState()
+            );
+        }
+
+        CopycatByteBlock.Byte bite = CopycatByteBlock.bite(false, true, false);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                bytePosition,
+                CopycatPavingMaterial.BYTE,
+                CopycatLayerPavingService.byteStateFor(Set.of(bite)),
+                inventory(CopycatPavingMaterial.BYTE, 1)
+            ) == PlacementResult.SUCCESS,
+            "deep slope Byte setup failed"
+        );
+
+        ItemStack filter = new ItemStack(Blocks.GRAVEL);
+        MaterialFillPlan plan = CopycatMaterialFillingService.planSamples(
+            helper.getLevel(),
+            List.of(new TrackSurfaceSample(
+                createBase.getX(),
+                createBase.getZ(),
+                createBase.getY()
+            )),
+            filter
+        );
+        check(helper, !plan.isEmpty(), "deep slope Byte was not selected");
+        for (int y = bytePosition.getY(); y <= createBase.getY() + 1; y++) {
+            check(
+                helper,
+                plan.protects(new BlockPos(createBase.getX(), y, createBase.getZ())),
+                "deep slope Byte did not own its paving column at y=" + y
+            );
+        }
+        check(
+            helper,
+            plan.redirectCreateBase(createBase).equals(supportPosition),
+            "Create support was not redirected below the deep slope Byte"
+        );
+
+        ItemStackHandler mountedInventory = blockInventory(Blocks.GRAVEL, 1);
+        FillPassResult result = CopycatMaterialFillingService.fillPlan(
+            helper.getLevel(),
+            plan,
+            filter,
+            mountedInventory
+        );
+        check(helper, result.foundSurfaceCopycat(), "deep slope Byte was not processed");
+        check(helper, result.changed(), "deep slope Byte was not filled");
+
+        assertPartMaterial(
+            helper,
+            bytePosition,
+            CopycatByteBlock.byByte(bite).getName(),
+            Blocks.GRAVEL.defaultBlockState()
+        );
+        check(
+            helper,
+            helper.getLevel().getBlockState(createBase).isAir()
+                && helper.getLevel().getBlockState(createBase.above()).isAir(),
+            "material plan did not protect the paving cells above the slope Byte"
+        );
+        check(
+            helper,
+            helper.getLevel().getBlockState(supportPosition).isAir(),
+            "material plan unexpectedly placed Create's support block"
+        );
+        check(
+            helper,
+            count(mountedInventory) == 0,
+            "deep Byte fill used the wrong number of material blocks"
+        );
+        helper.succeed();
+    }
+    @GameTest(template = "empty")
+    public static void materialPlanFillsEveryByteDirectlyUnderRoller(
+        GameTestHelper helper
+    ) {
+        BlockPos activePosition = helper.absolutePos(new BlockPos(4, 8, 4));
+        BlockPos upperByte = activePosition.above();
+        BlockPos lowerByte = activePosition.below(3);
+        CopycatByteBlock.Byte bite = CopycatByteBlock.bite(false, true, false);
+        for (BlockPos position : List.of(upperByte, lowerByte)) {
+            check(
+                helper,
+                CopycatLayerPavingService.tryPlace(
+                    helper.getLevel(),
+                    position,
+                    CopycatPavingMaterial.BYTE,
+                    CopycatLayerPavingService.byteStateFor(Set.of(bite)),
+                    inventory(CopycatPavingMaterial.BYTE, 1)
+                ) == PlacementResult.SUCCESS,
+                "vertical Byte setup failed at " + position
+            );
+        }
+
+        MaterialFillPlan plan =
+            CopycatMaterialFillingService.planBytesUnderRoller(
+                helper.getLevel(),
+                activePosition
+            );
+        check(helper, plan.targets().size() == 2, "vertical scan did not find every Byte");
+        check(
+            helper,
+            plan.targets().stream().map(target -> target.copycatPosition()).toList()
+                .equals(List.of(upperByte, lowerByte)),
+            "vertical scan did not retain top-to-bottom Roller order"
+        );
+        check(helper, plan.protects(upperByte), "upper Byte was not protected");
+        check(helper, plan.protects(activePosition), "lower Byte did not protect base cell");
+        check(
+            helper,
+            plan.redirectCreateBase(activePosition).equals(lowerByte.below()),
+            "multiple Bytes did not redirect support below the deepest Byte"
+        );
+
+        ItemStack filter = new ItemStack(Blocks.GRAVEL);
+        ItemStackHandler inventory = blockInventory(Blocks.GRAVEL, 2);
+        FillPassResult result = CopycatMaterialFillingService.fillPlan(
+            helper.getLevel(),
+            plan,
+            filter,
+            inventory
+        );
+        check(helper, result.changed(), "vertical Byte plan changed nothing");
+        for (BlockPos position : List.of(upperByte, lowerByte)) {
+            assertPartMaterial(
+                helper,
+                position,
+                CopycatByteBlock.byByte(bite).getName(),
+                Blocks.GRAVEL.defaultBlockState()
+            );
+        }
+        check(helper, count(inventory) == 0, "vertical Byte fill used wrong item count");
+        helper.succeed();
+    }
+    @GameTest(template = "empty")
+    public static void wideFillMaterialPlanFindsExactAndLowerSlopeBytes(
+        GameTestHelper helper
+    ) {
+        BlockPos createBase = helper.absolutePos(new BlockPos(4, 8, 4));
+        BlockPos exactByte = createBase.offset(-1, -1, 0);
+        BlockPos lowerByte = createBase.offset(1, -2, 0);
+        CopycatByteBlock.Byte bite = CopycatByteBlock.bite(false, true, false);
+        for (BlockPos position : List.of(exactByte, lowerByte)) {
+            check(
+                helper,
+                CopycatLayerPavingService.tryPlace(
+                    helper.getLevel(),
+                    position,
+                    CopycatPavingMaterial.BYTE,
+                    CopycatLayerPavingService.byteStateFor(Set.of(bite)),
+                    inventory(CopycatPavingMaterial.BYTE, 1)
+                ) == PlacementResult.SUCCESS,
+                "Wide Fill slope Byte setup failed at " + position
+            );
+        }
+
+        MaterialFillPlan plan =
+            CopycatMaterialFillingService.planWidePassForAnyFilter(
+                helper.getLevel(),
+                createBase,
+                null,
+                0
+            );
+        check(helper, plan.targets().size() == 2, "Wide Fill missed a slope Byte");
+        BlockPos lowerCreateTarget = lowerByte.above();
+        check(helper, plan.protects(exactByte), "exact Wide Fill Byte was not protected");
+        check(helper, plan.protects(lowerByte), "lower Wide Fill Byte was not protected");
+        check(
+            helper,
+            plan.protects(lowerCreateTarget)
+                && plan.protects(lowerCreateTarget.above()),
+            "cells above the lower Wide Fill Byte were not protected"
+        );
+        check(
+            helper,
+            plan.redirectCreateBase(lowerCreateTarget).equals(lowerByte.below()),
+            "Wide Fill support was not redirected below the lower Byte"
+        );
+
+        ItemStack filter = new ItemStack(Blocks.GRAVEL);
+        ItemStackHandler inventory = blockInventory(Blocks.GRAVEL, 2);
+        FillPassResult result = CopycatMaterialFillingService.fillPlan(
+            helper.getLevel(),
+            plan,
+            filter,
+            inventory
+        );
+        check(helper, result.changed(), "Wide Fill Bytes were not material-filled");
+        for (BlockPos position : List.of(exactByte, lowerByte)) {
+            assertPartMaterial(
+                helper,
+                position,
+                CopycatByteBlock.byByte(bite).getName(),
+                Blocks.GRAVEL.defaultBlockState()
+            );
+        }
+        check(helper, count(inventory) == 0, "Wide Fill Byte material cost was wrong");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void realWideFillRollerFillsBytesAndKeepsNormalPaving(
+        GameTestHelper helper
+    ) {
+        BlockPos createBase = helper.absolutePos(new BlockPos(4, 8, 4));
+        BlockPos exactByte = createBase.offset(-1, -1, 0);
+        BlockPos lowerByte = createBase.offset(1, -2, 0);
+        BlockPos upperDirectByte = createBase.above();
+        CopycatByteBlock.Byte bite = CopycatByteBlock.bite(false, true, false);
+        for (BlockPos position : List.of(exactByte, lowerByte, upperDirectByte)) {
+            check(
+                helper,
+                CopycatLayerPavingService.tryPlace(
+                    helper.getLevel(),
+                    position,
+                    CopycatPavingMaterial.BYTE,
+                    CopycatLayerPavingService.byteStateFor(Set.of(bite)),
+                    inventory(CopycatPavingMaterial.BYTE, 1)
+                ) == PlacementResult.SUCCESS,
+                "real Wide Fill Byte setup failed at " + position
+            );
+        }
+
+        ItemStack filter = new ItemStack(Blocks.GRAVEL);
+        CompoundTag rollerData = new CompoundTag();
+        rollerData.putInt("ScrollValue", RollerModeGate.WIDE_FILL_ORDINAL);
+        rollerData.put(
+            "Filter",
+            filter.save(helper.getLevel().registryAccess())
+        );
+        BearingContraption contraption = new BearingContraption();
+        contraption.getStorage().initialize();
+        ItemStackHandler mountedInventory = blockInventory(Blocks.GRAVEL, 4);
+        contraption.getStorage().attachExternal(mountedInventory);
+        MovementContext context = new MovementContext(
+            helper.getLevel(),
+            new StructureBlockInfo(
+                BlockPos.ZERO,
+                AllBlocks.MECHANICAL_ROLLER.getDefaultState(),
+                rollerData
+            ),
+            contraption
+        );
+
+        new ServerRollerMovementBehaviour().trigger(context, createBase);
+
+        for (BlockPos position : List.of(exactByte, lowerByte, upperDirectByte)) {
+            assertPartMaterial(
+                helper,
+                position,
+                CopycatByteBlock.byByte(bite).getName(),
+                Blocks.GRAVEL.defaultBlockState()
+            );
+        }
+        check(
+            helper,
+            helper.getLevel().getBlockState(createBase).is(Blocks.GRAVEL),
+            "normal Create Wide Fill paving did not continue"
+        );
+        check(
+            helper,
+            helper.getLevel().getBlockState(lowerByte.above()).isAir(),
+            "Create placed a full block above the lower slope Byte"
+        );
+        check(
+            helper,
+            count(mountedInventory) == 0,
+            "real Wide Fill pass consumed the wrong number of blocks"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void horizontalProfileCreatesFullLayer(GameTestHelper helper) {
         Level level = helper.getLevel();
         TrackGraph graph = new TrackGraph();
@@ -1901,6 +2186,30 @@ public final class CopycatRollerGameTests {
             rollerContext(level, contraption, rollerState, rollerData, 0),
             rollerContext(level, contraption, rollerState, rollerData, 1)
         );
+        MovementContext trailingMaterialRoller = rollerContext(
+            level,
+            contraption,
+            rollerState,
+            rollerData,
+            new BlockPos(0, 0, 1)
+        );
+        ItemStack zincFilter = AllItems.ZINC_INGOT.asStack();
+        rollers.getFirst().blockEntityData.put(
+            "Filter",
+            zincFilter.save(level.registryAccess())
+        );
+        rollers.get(1).blockEntityData.put(
+            "Filter",
+            new ItemStack(Blocks.GRAVEL).save(level.registryAccess())
+        );
+        rollers.getLast().blockEntityData.put(
+            "Filter",
+            zincFilter.save(level.registryAccess())
+        );
+        trailingMaterialRoller.blockEntityData.put(
+            "Filter",
+            new ItemStack(Blocks.GRAVEL).save(level.registryAccess())
+        );
 
         BlockPos start = helper.absolutePos(new BlockPos(4, 8, 4));
         Vec3 first = Vec3.atCenterOf(start);
@@ -1932,6 +2241,14 @@ public final class CopycatRollerGameTests {
                 ));
             }
         }
+
+        Set<BlockPos> reserved =
+            CopycatWideFillPavingService.plannedByteProtectionForZincRollers(
+                trailingMaterialRoller,
+                start,
+                profiles::get
+            );
+        check(helper, !reserved.isEmpty(), "zinc Byte mask reserved no cells");
 
         int[] neighbourProfiles = {0};
         MovementContext edgeRoller = rollers.getFirst();
@@ -1990,6 +2307,12 @@ public final class CopycatRollerGameTests {
                         continue;
                     }
                     foundByte = true;
+                    check(
+                        helper,
+                        reserved.contains(position)
+                            && reserved.contains(position.above()),
+                        "placed Byte or its upper cell was absent from the pre-reserved mask"
+                    );
                     check(
                         helper,
                         !centralColumns.contains(BlockPos.asLong(x, 0, z)),
@@ -2195,7 +2518,22 @@ public final class CopycatRollerGameTests {
         CompoundTag rollerData,
         int localX
     ) {
-        BlockPos localPosition = new BlockPos(localX, 0, 0);
+        return rollerContext(
+            level,
+            contraption,
+            rollerState,
+            rollerData,
+            new BlockPos(localX, 0, 0)
+        );
+    }
+
+    private static MovementContext rollerContext(
+        Level level,
+        BearingContraption contraption,
+        BlockState rollerState,
+        CompoundTag rollerData,
+        BlockPos localPosition
+    ) {
         StructureBlockInfo info = new StructureBlockInfo(
             localPosition,
             rollerState,
@@ -2476,6 +2814,13 @@ public final class CopycatRollerGameTests {
             "wrong consumed material item for " + property
         );
         check(helper, stored.consumedItem().getCount() == 1, "invalid consumed item count for " + property);
+    }
+
+    private static final class ServerRollerMovementBehaviour
+        extends RollerMovementBehaviour {
+        private void trigger(MovementContext context, BlockPos position) {
+            triggerPaver(context, position);
+        }
     }
 
     private static void check(GameTestHelper helper, boolean condition, String message) {

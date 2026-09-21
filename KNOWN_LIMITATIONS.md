@@ -62,14 +62,17 @@
     Randomize Filters 1.0.7. The straight, diagonal, and Bezier X/Z profiles
     are tested separately against Create's real `PaveTask`.
 
-12. Automatic material filling is active only in `STRAIGHT_FILL`. It uses
-    Create's exact X/Z track profile but searches up to one block below the
-    expected surface before selecting the closest Copycat. The selected cell
-    is passed through Create's real Roller placement transaction to discover
-    the block chosen for that position, then protected from the later ordinary
-    pass. Every column without a selected Copycat continues through Create's
-    original paving code. A material rejected by Copycats+ is skipped without
-    net consumption.
+12. Automatic material filling is active in `STRAIGHT_FILL` and `WIDE_FILL`.
+    Each material Roller scans its real X/Z work column from one cell above
+    Create's active paving position down through the configured
+    `rollerFillDepth`, selecting every `copycat_byte` rather than only the
+    nearest profile match. The exact track profile is still used to find other
+    Copycat shapes. Selected cells are passed through Create's real Roller
+    placement transaction to discover the block chosen for that position, then
+    their paving columns are protected from the later ordinary pass. Every
+    target without a selected Copycat continues through Create's original
+    paving code. A material rejected by Copycats+ is skipped without net
+    consumption.
 
 13. Material orientation is resolved through
     `ICopycatBlock.getAcceptedBlockState(...)` as if the top face had been
@@ -77,12 +80,13 @@
     existing empty part; absent parts and parts with a player-assigned
     material are not changed.
 
-14. If a full selected Copycat occupies Create's base target, that target is
-    redirected exactly one block downward. Further downward filling, occupied
-    block handling, leaves, portals, inventory extraction, and
-    `rollerFillDepth` remain controlled by Create. Consequently, as with
-    Create's normal Roller, a pass can stop at the first depth where any block
-    is successfully placed.
+14. A selected Copycat at or below Create's base target owns the vertical
+    paving cells above it, preventing an ordinary block or slab from being
+    placed on top. Create's base attempt is redirected directly below that
+    Copycat. Further occupied-block handling, leaves, portals, inventory
+    extraction, and `rollerFillDepth` remain controlled by Create. Consequently,
+    as with Create's normal Roller, a pass can stop at the first depth where any
+    block is successfully placed.
 
 15. Third-party filter compatibility is protocol-based rather than tied to a
     list of mods. A compatible filter must resolve its material synchronously
@@ -124,5 +128,7 @@
     radius. A solid obstacle terminates only the affected branch, which
     prevents placement through walls but can leave an intentional opening.
 17. Copycat Byte is reserved for automatic zinc Wide Fill and is not accepted
-    as a direct Roller filter. Non-zinc Wide Fill, Tunnel Pave, and all unrelated
-    filters retain Create's standard behavior.
+    as a direct Roller filter. Ordinary block filters in Wide Fill additionally
+    fill existing Copycats and reserve the future Byte masks produced by every
+    zinc Roller row in the same contraption. Tunnel Pave and unrelated filters
+    retain Create's standard behavior.
