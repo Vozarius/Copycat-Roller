@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -341,6 +342,65 @@ class WideFillBytePlannerTest {
         }
         assertEveryCellHasReachableParent(seeds, cells);
     }
+    @Test
+    void movingCoreWindowsCoverOneMonolithicCurvedContour() {
+        List<WideFillBytePlanner.Seed> curve = List.of(
+            new WideFillBytePlanner.Seed(0, 8, 0, 8, 0, 0, 8, false, true),
+            new WideFillBytePlanner.Seed(1, 8, 0, 8, -1, 1, 8, false, true),
+            new WideFillBytePlanner.Seed(2, 8, 0, 8, -2, 2, 8, false, true),
+            new WideFillBytePlanner.Seed(3, 7, 0, 7, -3, 3, 7, false, true),
+            new WideFillBytePlanner.Seed(4, 7, 0, 7, -4, 4, 7, false, true),
+            new WideFillBytePlanner.Seed(5, 6, 0, 6, -5, 5, 6, false, true),
+            new WideFillBytePlanner.Seed(6, 5, 0, 5, -6, 6, 5, false, true),
+            new WideFillBytePlanner.Seed(7, 4, 0, 4, -7, 7, 4, false, true),
+            new WideFillBytePlanner.Seed(7, 3, 0, 3, -7, 7, 3, false, true),
+            new WideFillBytePlanner.Seed(8, 2, 0, 2, -8, 8, 2, false, true),
+            new WideFillBytePlanner.Seed(8, 1, 0, 1, -8, 8, 1, false, true),
+            new WideFillBytePlanner.Seed(8, 0, 0, 0, -8, 8, 0, false, true)
+        );
+        List<WideFillBytePlanner.ByteCell> monolithic =
+            WideFillBytePlanner.plan(curve, 6);
+        Set<WideFillBytePlanner.ByteCell> traversed = new HashSet<>();
+
+        for (int owner = 0; owner < curve.size(); owner++) {
+            List<WideFillBytePlanner.Seed> window = new ArrayList<>();
+            for (int index = 0; index < curve.size(); index++) {
+                WideFillBytePlanner.Seed seed = curve.get(index);
+                window.add(new WideFillBytePlanner.Seed(
+                    seed.blockX(),
+                    seed.blockZ(),
+                    seed.surfaceY(),
+                    seed.tangentX(),
+                    seed.tangentZ(),
+                    seed.normalX(),
+                    seed.normalZ(),
+                    seed.allowNegativeLateral(),
+                    seed.allowPositiveLateral(),
+                    index == owner
+                ));
+            }
+            traversed.addAll(WideFillBytePlanner.plan(window, 6));
+        }
+
+        assertFalse(monolithic.isEmpty());
+        assertEquals(
+            new HashSet<>(monolithic),
+            traversed,
+            "moving profile windows left radial gaps or overlapping rays"
+        );
+        for (int distance = 1; distance <= 12; distance++) {
+            int expectedDistance = distance;
+            List<WideFillBytePlanner.ByteCell> band = traversed.stream()
+                .filter(cell -> cell.distance() == expectedDistance)
+                .toList();
+            assertFalse(band.isEmpty(), "missing curved band " + distance);
+            assertEightConnected(
+                band,
+                "moving curved band is not monolithic at " + distance
+            );
+        }
+    }
+
     @Test
     void reachMatchesCreatesWideFillRadius() {
         assertEquals(0, WideFillBytePlanner.reachBlocksForCreateDepth(0));

@@ -31,8 +31,8 @@ prevents moving end caps, gaps, or a second slope radius when the carriage turns
 The first Byte matches the central height, then every half-block step outward
 drops by half a block. Reach matches Create's normal Wide Fill. Ordinary block
 filters fill every Byte in the real vertical column below each Roller, including
-the cell above Create's normal paving point. Future Byte cells from all zinc
-Roller rows are protected before normal Create paving continues.
+the cell above Create's normal paving point. Each Byte remains tied to its own
+paving level, while normal Create paving continues everywhere else.
 
 One Zinc Ingot equals 8 Layers, 16 Half Layers, or 8 Copycat Bytes. Change is
 returned as real items; an operation is cancelled if its full cost or change

@@ -52,7 +52,6 @@ public final class WideFillBytePlanner {
 
         int maximumHalfSteps = maximumReachBlocks * 2;
         Map<HalfColumn, NearestSource> nearest = new HashMap<>();
-        Map<HalfColumn, NearestSource> writableNearest = new HashMap<>();
         for (SourceVoxel source : sources) {
             for (int offsetX = -maximumHalfSteps;
                  offsetX <= maximumHalfSteps;
@@ -98,18 +97,6 @@ public final class WideFillBytePlanner {
                         candidate,
                         WideFillBytePlanner::nearer
                     );
-                    if (source.outputOwner()
-                        && Math.abs(along) <= 0.75 + HALF_GRID_EPSILON
-                        && Math.abs(side) > SIDE_EPSILON
-                        && (side > 0
-                            ? source.allowPositiveLateral()
-                            : source.allowNegativeLateral())) {
-                        writableNearest.merge(
-                            column,
-                            candidate,
-                            WideFillBytePlanner::nearer
-                        );
-                    }
                 }
             }
         }
@@ -147,39 +134,13 @@ public final class WideFillBytePlanner {
             }
         }
 
-        Map<HalfColumn, NearestSource> writableAllowed = new HashMap<>();
-        Map<HalfColumn, NearestSource> writableSelected = new HashMap<>();
-        for (Map.Entry<HalfColumn, NearestSource> entry : allowed.entrySet()) {
-            NearestSource writer = writableNearest.get(entry.getKey());
-            if (writer != null
-                && writer.distance() == entry.getValue().distance()) {
-                writableAllowed.put(entry.getKey(), entry.getValue());
-                if (selected.containsKey(entry.getKey())) {
-                    writableSelected.put(entry.getKey(), entry.getValue());
-                }
-            }
-        }
-        List<Map.Entry<HalfColumn, NearestSource>> writableInitial =
-            new ArrayList<>(writableSelected.entrySet());
-        writableInitial.sort(Comparator.comparingInt(
-            entry -> entry.getValue().distance()
-        ));
-        for (Map.Entry<HalfColumn, NearestSource> entry : writableInitial) {
-            if (!ensureSupported(
-                entry.getKey(),
-                entry.getValue(),
-                writableSelected,
-                writableAllowed,
-                sources
-            )) {
-                writableSelected.remove(entry.getKey());
-            }
-        }
-
-        List<ByteCell> ordered = new ArrayList<>(writableSelected.size());
-        for (Map.Entry<HalfColumn, NearestSource> entry : writableSelected.entrySet()) {
+        List<ByteCell> ordered = new ArrayList<>(selected.size());
+        for (Map.Entry<HalfColumn, NearestSource> entry : selected.entrySet()) {
             HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
+            if (!owner.source().outputOwner()) {
+                continue;
+            }
             ordered.add(new ByteCell(
                 column.x(),
                 outputLowerHalfY(owner),

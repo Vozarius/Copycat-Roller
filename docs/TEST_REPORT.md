@@ -17,13 +17,13 @@ Release verification environment:
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-The final version 2.0 build completed successfully. All 51 unit tests passed
+The final version 2.0 build completed successfully. All 52 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
 loaded Copycat Roller 2.0, Create 6, and Copycats+ 3.0.9, then passed all
-65/65 required GameTests in 1.784 seconds. The server run also verifies that
+65/65 required GameTests in 1.658 seconds. The server run also verifies that
 common code does not load client-only classes.
 
-The final clean build took 18 seconds; the dedicated GameTest run took 44 seconds.
+The final clean build took 13 seconds; the dedicated GameTest run took 34 seconds.
 
 ## Version 2.0 coverage
 
@@ -44,6 +44,9 @@ The new unit tests verify:
 - station correspondence wins over a spatially nearer rounded cell from a
   different longitudinal section;
 - read-only halo seeds shape a complete contour but never own world output;
+- moving writable windows across a quarter-turn produce exactly the same cells
+  as one monolithic contour, with every half-block distance band connected and
+  no radial gaps or overlapping rays;
 - writable height-changing bands retain every core cell even when a halo source
   is geometrically nearer, and remain connected across half-block transitions;
 - adjacent track edges sharing one Create `PaveTask` retain separate section
@@ -88,11 +91,11 @@ The new GameTests verify:
   Fill targets and protect the cells above them;
 - a real `RollerMovementBehaviour.triggerPaver` call in `WIDE_FILL` fills slope
   Bytes, including one above Create's normal paving point, keeps protected upper
-  cells empty, and still lets Create pave an ordinary target in the same pass;
-- one material Roller fills every Byte in its real vertical work column, charges
-  each part, and redirects support below the deepest selected Byte;
-- a material Roller in a separate trailing row reserves the complete future
-  Byte mask of every zinc row, including the cells above the planned Bytes.
+  cells empty, fills a deeper Byte in the same Roller column, still lets Create
+  pave the ordinary upper target, and creates no support ray below the Byte;
+- one material Roller fills every Byte in its real vertical work column and
+  charges each part, while every Byte redirects only its own paving level so a
+  deeper Byte cannot create radial or vertical fill rays.
 
 The existing suite still covers precise straight, diagonal, and Bezier track
 profiles, Layer/Half Layer/Slope Layer geometry, atomic inventory handling,
@@ -102,10 +105,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-2.0.jar` — 172,901 bytes
-  - SHA-256: `87C593F081509B3B73FE33C0A8F549B284C7DA2906A74D81437AD59828438011`
-- `build/libs/copycat_roller-2.0-sources.jar` — 69,359 bytes
-  - SHA-256: `B0C73476E73809A3845F2AD3F175E024E1065948D990B49E55110595E675CB1E`
+- `build/libs/copycat_roller-2.0.jar` — 170,994 bytes
+  - SHA-256: `FA6B5B086D99F99F14977201D153FF6FE0C73732843418CDAE120437ABB34BE2`
+- `build/libs/copycat_roller-2.0-sources.jar` — 68,396 bytes
+  - SHA-256: `99C717F6CFD325E6E2FE4332B0E60EA7487A105ABCBF97370F317D812B3F6ECD`
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this

@@ -129,6 +129,7 @@
     prevents placement through walls but can leave an intentional opening.
 17. Copycat Byte is reserved for automatic zinc Wide Fill and is not accepted
     as a direct Roller filter. Ordinary block filters in Wide Fill additionally
-    fill existing Copycats and reserve the future Byte masks produced by every
-    zinc Roller row in the same contraption. Tunnel Pave and unrelated filters
-    retain Create's standard behavior.
+    fill existing Copycats directly under them. They do not reserve empty future
+    Byte cells, because doing so would alter Create's normal depth-stop
+    semantics. Tunnel Pave and unrelated filters retain Create's standard
+    behavior.

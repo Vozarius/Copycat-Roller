@@ -176,7 +176,7 @@ public final class CopycatMaterialFillingService {
                     instanceof CopycatByteBlock)) {
                 continue;
             }
-            targets.add(new SurfaceTarget(position, activePosition));
+            targets.add(new SurfaceTarget(position, position));
         }
         return targets.isEmpty()
             ? MaterialFillPlan.EMPTY

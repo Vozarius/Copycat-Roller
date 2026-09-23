@@ -1033,11 +1033,20 @@ public final class CopycatRollerGameTests {
             "vertical scan did not retain top-to-bottom Roller order"
         );
         check(helper, plan.protects(upperByte), "upper Byte was not protected");
-        check(helper, plan.protects(activePosition), "lower Byte did not protect base cell");
         check(
             helper,
-            plan.redirectCreateBase(activePosition).equals(lowerByte.below()),
-            "multiple Bytes did not redirect support below the deepest Byte"
+            !plan.protects(activePosition),
+            "deep Byte incorrectly protected the current upper paving level"
+        );
+        check(
+            helper,
+            plan.redirectCreateBase(activePosition).equals(activePosition),
+            "deep Byte incorrectly redirected the current upper paving level"
+        );
+        check(
+            helper,
+            plan.redirectCreateBase(lowerByte).equals(lowerByte.below()),
+            "Byte did not redirect only its own paving level"
         );
 
         ItemStack filter = new ItemStack(Blocks.GRAVEL);
@@ -1134,8 +1143,14 @@ public final class CopycatRollerGameTests {
         BlockPos exactByte = createBase.offset(-1, -1, 0);
         BlockPos lowerByte = createBase.offset(1, -2, 0);
         BlockPos upperDirectByte = createBase.above();
+        BlockPos deepDirectByte = createBase.below(3);
         CopycatByteBlock.Byte bite = CopycatByteBlock.bite(false, true, false);
-        for (BlockPos position : List.of(exactByte, lowerByte, upperDirectByte)) {
+        for (BlockPos position : List.of(
+            exactByte,
+            lowerByte,
+            upperDirectByte,
+            deepDirectByte
+        )) {
             check(
                 helper,
                 CopycatLayerPavingService.tryPlace(
@@ -1158,7 +1173,7 @@ public final class CopycatRollerGameTests {
         );
         BearingContraption contraption = new BearingContraption();
         contraption.getStorage().initialize();
-        ItemStackHandler mountedInventory = blockInventory(Blocks.GRAVEL, 4);
+        ItemStackHandler mountedInventory = blockInventory(Blocks.GRAVEL, 5);
         contraption.getStorage().attachExternal(mountedInventory);
         MovementContext context = new MovementContext(
             helper.getLevel(),
@@ -1172,7 +1187,12 @@ public final class CopycatRollerGameTests {
 
         new ServerRollerMovementBehaviour().trigger(context, createBase);
 
-        for (BlockPos position : List.of(exactByte, lowerByte, upperDirectByte)) {
+        for (BlockPos position : List.of(
+            exactByte,
+            lowerByte,
+            upperDirectByte,
+            deepDirectByte
+        )) {
             assertPartMaterial(
                 helper,
                 position,
@@ -1189,6 +1209,11 @@ public final class CopycatRollerGameTests {
             helper,
             helper.getLevel().getBlockState(lowerByte.above()).isAir(),
             "Create placed a full block above the lower slope Byte"
+        );
+        check(
+            helper,
+            helper.getLevel().getBlockState(deepDirectByte.below()).isAir(),
+            "deep Byte redirected the upper paving attempt into a fill ray"
         );
         check(
             helper,
@@ -2186,30 +2211,7 @@ public final class CopycatRollerGameTests {
             rollerContext(level, contraption, rollerState, rollerData, 0),
             rollerContext(level, contraption, rollerState, rollerData, 1)
         );
-        MovementContext trailingMaterialRoller = rollerContext(
-            level,
-            contraption,
-            rollerState,
-            rollerData,
-            new BlockPos(0, 0, 1)
-        );
-        ItemStack zincFilter = AllItems.ZINC_INGOT.asStack();
-        rollers.getFirst().blockEntityData.put(
-            "Filter",
-            zincFilter.save(level.registryAccess())
-        );
-        rollers.get(1).blockEntityData.put(
-            "Filter",
-            new ItemStack(Blocks.GRAVEL).save(level.registryAccess())
-        );
-        rollers.getLast().blockEntityData.put(
-            "Filter",
-            zincFilter.save(level.registryAccess())
-        );
-        trailingMaterialRoller.blockEntityData.put(
-            "Filter",
-            new ItemStack(Blocks.GRAVEL).save(level.registryAccess())
-        );
+
 
         BlockPos start = helper.absolutePos(new BlockPos(4, 8, 4));
         Vec3 first = Vec3.atCenterOf(start);
@@ -2242,13 +2244,6 @@ public final class CopycatRollerGameTests {
             }
         }
 
-        Set<BlockPos> reserved =
-            CopycatWideFillPavingService.plannedByteProtectionForZincRollers(
-                trailingMaterialRoller,
-                start,
-                profiles::get
-            );
-        check(helper, !reserved.isEmpty(), "zinc Byte mask reserved no cells");
 
         int[] neighbourProfiles = {0};
         MovementContext edgeRoller = rollers.getFirst();
@@ -2307,12 +2302,7 @@ public final class CopycatRollerGameTests {
                         continue;
                     }
                     foundByte = true;
-                    check(
-                        helper,
-                        reserved.contains(position)
-                            && reserved.contains(position.above()),
-                        "placed Byte or its upper cell was absent from the pre-reserved mask"
-                    );
+
                     check(
                         helper,
                         !centralColumns.contains(BlockPos.asLong(x, 0, z)),
@@ -2518,22 +2508,7 @@ public final class CopycatRollerGameTests {
         CompoundTag rollerData,
         int localX
     ) {
-        return rollerContext(
-            level,
-            contraption,
-            rollerState,
-            rollerData,
-            new BlockPos(localX, 0, 0)
-        );
-    }
-
-    private static MovementContext rollerContext(
-        Level level,
-        BearingContraption contraption,
-        BlockState rollerState,
-        CompoundTag rollerData,
-        BlockPos localPosition
-    ) {
+        BlockPos localPosition = new BlockPos(localX, 0, 0);
         StructureBlockInfo info = new StructureBlockInfo(
             localPosition,
             rollerState,

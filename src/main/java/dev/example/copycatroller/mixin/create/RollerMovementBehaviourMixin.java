@@ -146,15 +146,7 @@ public abstract class RollerMovementBehaviourMixin {
             ),
             profilePlan
         );
-        if (wideFill) {
-            plan = plan.protecting(
-                CopycatWideFillPavingService.plannedByteProtectionForZincRollers(
-                    context,
-                    position,
-                    this::createHeightProfileForTracks
-                )
-            );
-        }
+
         if (plan.isEmpty()) {
             return;
         }

@@ -2,7 +2,6 @@ package dev.example.copycatroller.paving;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -19,7 +18,6 @@ import dev.example.copycatroller.paving.WideFillBytePlanner.HalfVoxel;
 import dev.example.copycatroller.paving.WideFillBytePlanner.Seed;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
@@ -79,55 +77,6 @@ public final class CopycatWideFillPavingService {
             changed |= result == PlacementResult.SUCCESS;
         }
         return changed;
-    }
-
-    /**
-     * Computes the cells that zinc edge Rollers will occupy before ordinary
-     * Wide Fill actors run. Reserving this mask makes actor iteration order
-     * irrelevant: a material Roller cannot pave a full block into a Byte cell
-     * that an edge Roller is about to create.
-     */
-    public static Set<BlockPos> plannedByteProtectionForZincRollers(
-        MovementContext reference,
-        BlockPos fallbackPosition,
-        TrackProfileProvider profileProvider
-    ) {
-        if (reference.world.isClientSide || reference.contraption == null) {
-            return Set.of();
-        }
-        Direction facing = reference.state.getValue(RollerBlock.FACING);
-        Set<BlockPos> positions = new LinkedHashSet<>();
-        for (MovementContext actor : reference.contraption.getActors().stream()
-            .map(pair -> pair.getRight())
-            .filter(actor -> actor.state.getBlock() instanceof RollerBlock)
-            .filter(actor -> !actor.disabled)
-            .filter(actor -> actor.state.getValue(RollerBlock.FACING) == facing)
-            .filter(actor -> RollerModeGate.isWideFill(actor.blockEntityData))
-            .filter(actor -> CopycatLayerPavingService.isZincIngot(
-                ItemStack.parseOptional(
-                    reference.world.registryAccess(),
-                    actor.blockEntityData.getCompound("Filter")
-                )
-            ))
-            .toList()) {
-            PaveTask profile = profileProvider.create(actor);
-            BlockPos actorFallback = fallbackForActor(
-                reference,
-                actor,
-                fallbackPosition
-            );
-            for (ByteCell cell : planned(
-                actor,
-                actorFallback,
-                profile,
-                profileProvider
-            ).cells()) {
-                BlockPos position = blockPosition(cell);
-                positions.add(position);
-                positions.add(position.above());
-            }
-        }
-        return Set.copyOf(positions);
     }
 
     private static PavingPlan planned(
@@ -284,22 +233,6 @@ public final class CopycatWideFillPavingService {
         return new PavingPlan(
             List.copyOf(seeds),
             WideFillBytePlanner.plan(seeds, reach)
-        );
-    }
-
-    private static BlockPos fallbackForActor(
-        MovementContext reference,
-        MovementContext actor,
-        BlockPos referenceFallback
-    ) {
-        BlockPos localDelta = actor.localPos.subtract(reference.localPos);
-        Vec3 worldDelta = reference.rotation.apply(
-            Vec3.atLowerCornerOf(localDelta)
-        );
-        return BlockPos.containing(
-            referenceFallback.getX() + worldDelta.x,
-            referenceFallback.getY() + worldDelta.y,
-            referenceFallback.getZ() + worldDelta.z
         );
     }
 
