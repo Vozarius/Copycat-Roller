@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -134,20 +135,23 @@ public final class WideFillBytePlanner {
             }
         }
 
-        List<ByteCell> ordered = new ArrayList<>(selected.size());
+        Set<ByteCell> output = new LinkedHashSet<>();
         for (Map.Entry<HalfColumn, NearestSource> entry : selected.entrySet()) {
             HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
             if (!owner.source().outputOwner()) {
                 continue;
             }
-            ordered.add(new ByteCell(
+            output.add(new ByteCell(
                 column.x(),
                 outputLowerHalfY(owner),
                 column.z(),
                 owner.distance()
             ));
         }
+        closeDiagonalGaps(output, selected, allowed);
+
+        List<ByteCell> ordered = new ArrayList<>(output);
         ordered.sort((left, right) -> {
             int comparison = Integer.compare(left.distance(), right.distance());
             if (comparison != 0) return comparison;
@@ -158,6 +162,96 @@ public final class WideFillBytePlanner {
             return Integer.compare(left.lowerHalfY(), right.lowerHalfY());
         });
         return List.copyOf(ordered);
+    }
+
+    /**
+     * Rounded Euclidean bands can be eight-connected while two consecutive
+     * Bytes touch only at a corner, which is a visible hole in Minecraft.
+     * Bridge only those same-height, same-distance corner pairs, choosing an
+     * already outward-allowed orthogonal cell nearest to the centre mask.
+     */
+    private static void closeDiagonalGaps(        Set<ByteCell> output,
+        Map<HalfColumn, NearestSource> selected,
+        Map<HalfColumn, NearestSource> allowed
+    ) {
+        List<Map.Entry<HalfColumn, NearestSource>> owners = selected.entrySet()
+            .stream()
+            .filter(entry -> entry.getValue().source().outputOwner())
+            .toList();
+        for (Map.Entry<HalfColumn, NearestSource> entry : owners) {
+            HalfColumn column = entry.getKey();
+            NearestSource owner = entry.getValue();
+            int distance = owner.distance();
+            int lowerHalfY = outputLowerHalfY(owner);
+            for (int offsetX = -1; offsetX <= 1; offsetX += 2) {
+                for (int offsetZ = -1; offsetZ <= 1; offsetZ += 2) {
+                    NearestSource diagonal = selected.get(new HalfColumn(
+                        column.x() + offsetX,
+                        column.z() + offsetZ
+                    ));
+                    if (!sameBand(diagonal, distance, lowerHalfY)) {
+                        continue;
+                    }
+                    HalfColumn alongX = new HalfColumn(
+                        column.x() + offsetX,
+                        column.z()
+                    );
+                    HalfColumn alongZ = new HalfColumn(
+                        column.x(),
+                        column.z() + offsetZ
+                    );
+                    if (sameBand(selected.get(alongX), distance, lowerHalfY)
+                        || sameBand(
+                            selected.get(alongZ),
+                            distance,
+                            lowerHalfY
+                        )) {
+                        continue;
+                    }
+                    HalfColumn bridge = betterBridge(
+                        alongX,
+                        alongZ,
+                        allowed
+                    );
+                    if (bridge != null) {
+                        output.add(new ByteCell(
+                            bridge.x(),
+                            lowerHalfY,
+                            bridge.z(),
+                            distance
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean sameBand(
+        NearestSource source,
+        int distance,
+        int lowerHalfY
+    ) {
+        return source != null
+            && source.distance() == distance
+            && outputLowerHalfY(source) == lowerHalfY;
+    }
+
+    private static HalfColumn betterBridge(
+        HalfColumn first,
+        HalfColumn second,
+        Map<HalfColumn, NearestSource> allowed
+    ) {
+        NearestSource firstOwner = allowed.get(first);
+        NearestSource secondOwner = allowed.get(second);
+        if (firstOwner == null) {
+            return secondOwner == null ? null : second;
+        }
+        if (secondOwner == null) {
+            return first;
+        }
+        return firstOwner.squaredDistance() <= secondOwner.squaredDistance()
+            ? first
+            : second;
     }
 
     private static boolean ensureSupported(

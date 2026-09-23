@@ -364,7 +364,9 @@ class WideFillBytePlannerTest {
 
         for (int owner = 0; owner < curve.size(); owner++) {
             List<WideFillBytePlanner.Seed> window = new ArrayList<>();
-            for (int index = 0; index < curve.size(); index++) {
+            int first = Math.max(0, owner - 3);
+            int last = Math.min(curve.size() - 1, owner + 3);
+            for (int index = first; index <= last; index++) {
                 WideFillBytePlanner.Seed seed = curve.get(index);
                 window.add(new WideFillBytePlanner.Seed(
                     seed.blockX(),
@@ -383,6 +385,7 @@ class WideFillBytePlannerTest {
         }
 
         assertFalse(monolithic.isEmpty());
+        assertEveryCellHasReachableParent(curve, monolithic);
         assertEquals(
             new HashSet<>(monolithic),
             traversed,
@@ -397,6 +400,11 @@ class WideFillBytePlannerTest {
             assertEightConnected(
                 band,
                 "moving curved band is not monolithic at " + distance
+            );
+            assertFourConnected(
+                band,
+                "moving curved band contains a diagonal visual gap at "
+                    + distance
             );
         }
     }
@@ -457,6 +465,37 @@ class WideFillBytePlannerTest {
             assertTrue(parentFound, "unreachable planned cell " + cell);
             reached.add(cell.voxel());
         }
+    }
+
+    private static void assertFourConnected(
+        List<WideFillBytePlanner.ByteCell> cells,
+        String message
+    ) {
+        Set<String> remaining = new HashSet<>();
+        for (WideFillBytePlanner.ByteCell cell : cells) {
+            remaining.add(cell.halfX() + "," + cell.halfZ());
+        }
+        ArrayDeque<String> queue = new ArrayDeque<>();
+        String first = remaining.iterator().next();
+        remaining.remove(first);
+        queue.add(first);
+        while (!queue.isEmpty()) {
+            String[] coordinates = queue.removeFirst().split(",");
+            int x = Integer.parseInt(coordinates[0]);
+            int z = Integer.parseInt(coordinates[1]);
+            for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    if (Math.abs(offsetX) + Math.abs(offsetZ) != 1) {
+                        continue;
+                    }
+                    String neighbour = (x + offsetX) + "," + (z + offsetZ);
+                    if (remaining.remove(neighbour)) {
+                        queue.add(neighbour);
+                    }
+                }
+            }
+        }
+        assertTrue(remaining.isEmpty(), message + ": " + remaining);
     }
 
     private static void assertEightConnected(

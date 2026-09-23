@@ -20,10 +20,10 @@ Release verification environment:
 The final version 2.0 build completed successfully. All 52 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
 loaded Copycat Roller 2.0, Create 6, and Copycats+ 3.0.9, then passed all
-65/65 required GameTests in 1.658 seconds. The server run also verifies that
+65/65 required GameTests in 1.024 seconds. The server run also verifies that
 common code does not load client-only classes.
 
-The final clean build took 13 seconds; the dedicated GameTest run took 34 seconds.
+The final clean build took 10 seconds; the dedicated GameTest run took 27 seconds.
 
 ## Version 2.0 coverage
 
@@ -45,8 +45,9 @@ The new unit tests verify:
   different longitudinal section;
 - read-only halo seeds shape a complete contour but never own world output;
 - moving writable windows across a quarter-turn produce exactly the same cells
-  as one monolithic contour, with every half-block distance band connected and
-  no radial gaps or overlapping rays;
+  as one monolithic contour, with every half-block distance band connected by
+  shared faces; isolated diagonal contacts receive one inward corner bridge,
+  eliminating visual notches without widening already connected sections;
 - writable height-changing bands retain every core cell even when a halo source
   is geometrically nearer, and remain connected across half-block transitions;
 - adjacent track edges sharing one Create `PaveTask` retain separate section
@@ -105,10 +106,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-2.0.jar` — 170,994 bytes
-  - SHA-256: `FA6B5B086D99F99F14977201D153FF6FE0C73732843418CDAE120437ABB34BE2`
-- `build/libs/copycat_roller-2.0-sources.jar` — 68,396 bytes
-  - SHA-256: `99C717F6CFD325E6E2FE4332B0E60EA7487A105ABCBF97370F317D812B3F6ECD`
+- `build/libs/copycat_roller-2.0.jar` — 171,972 bytes
+  - SHA-256: `040ED7878E89AAEAA9D7E5113F6D0EFF303AD29935255EDB81415943494F2386`
+- `build/libs/copycat_roller-2.0-sources.jar` — 69,007 bytes
+  - SHA-256: `5F4FF6754070248E0ECEE0C9ABCE4D71143F4274E0AFC8D51389C8F5702E494C`
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this
