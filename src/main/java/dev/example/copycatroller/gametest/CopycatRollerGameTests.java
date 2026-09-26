@@ -70,6 +70,7 @@ import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import net.neoforged.neoforge.items.ItemStackHandler;
+import net.neoforged.neoforge.items.wrapper.CombinedInvWrapper;
 import org.apache.commons.lang3.tuple.MutablePair;
 
 @GameTestHolder(CopycatRoller.MOD_ID)
@@ -364,10 +365,10 @@ public final class CopycatRollerGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", required = false)
     public static void randomizeFilterUsesItsSelectedBlockForCopycat(GameTestHelper helper) {
         if (!ModList.get().isLoaded("createrandomizefilters")) {
-            helper.succeed();
+            helper.fail("optional Randomize Filters integration was not run: mod is absent");
             return;
         }
 
@@ -498,6 +499,113 @@ public final class CopycatRollerGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty")
+    public static void zincChangeCannotDisappearIntoCreativeCrate(GameTestHelper helper) {
+        BlockPos bytePosition = resetTarget(helper);
+        ItemStackHandler finiteZinc = zincInventory(1, 2);
+        CreativeCrateMountedStorage unrelatedCreative =
+            new CreativeCrateMountedStorage(new ItemStack(Blocks.STONE));
+        CombinedInvWrapper storage = new CombinedInvWrapper(
+            finiteZinc,
+            unrelatedCreative
+        );
+
+        PlacementResult result = CopycatLayerPavingService.tryPlaceWithZinc(
+            helper.getLevel(),
+            bytePosition,
+            CopycatPavingMaterial.BYTE,
+            CopycatLayerPavingService.byteStateFor(Set.of(
+                CopycatByteBlock.bite(false, false, false)
+            )),
+            storage
+        );
+
+        check(helper, result == PlacementResult.FAIL, "lossy Creative Crate insertion was accepted");
+        check(helper, helper.getLevel().getBlockState(bytePosition).isAir(), "failed payment placed a Byte");
+        check(helper, countZinc(finiteZinc) == 2, "finite zinc was not restored");
+        check(
+            helper,
+            CopycatLayerPavingService.isZincIngot(finiteZinc.getStackInSlot(0)),
+            "finite zinc slot was replaced by conversion change"
+        );
+
+        BlockPos halfLayerPosition = bytePosition.east();
+        helper.getLevel().setBlockAndUpdate(halfLayerPosition, Blocks.AIR.defaultBlockState());
+        PlacementResult halfLayerResult = CopycatLayerPavingService.tryPlaceWithZinc(
+            helper.getLevel(),
+            halfLayerPosition,
+            CopycatPavingMaterial.HALF_LAYER,
+            CopycatLayerPavingService.halfLayerStateFor(Direction.Axis.X, 1, 0),
+            storage
+        );
+        check(
+            helper,
+            halfLayerResult == PlacementResult.FAIL,
+            "lossy Half Layer change insertion was accepted"
+        );
+        check(
+            helper,
+            helper.getLevel().getBlockState(halfLayerPosition).isAir(),
+            "failed Half Layer payment changed the world"
+        );
+        check(helper, countZinc(finiteZinc) == 2, "Half Layer payment lost finite zinc");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void filledByteCanBeExtendedAfterResourcesReturn(GameTestHelper helper) {
+        BlockPos position = resetTarget(helper);
+        CopycatByteBlock.Byte first = CopycatByteBlock.bite(false, false, false);
+        CopycatByteBlock.Byte second = CopycatByteBlock.bite(true, false, false);
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.BYTE,
+                CopycatLayerPavingService.byteStateFor(Set.of(first)),
+                inventory(CopycatPavingMaterial.BYTE, 1)
+            ) == PlacementResult.SUCCESS,
+            "initial Byte was not placed"
+        );
+        check(
+            helper,
+            CopycatMaterialFillingService.tryFill(
+                helper.getLevel(),
+                position,
+                new ItemStack(Blocks.GRAVEL),
+                blockInventory(Blocks.GRAVEL, 1)
+            ) == FillResult.SUCCESS,
+            "initial Byte was not filled"
+        );
+
+        check(
+            helper,
+            CopycatLayerPavingService.tryPlace(
+                helper.getLevel(),
+                position,
+                CopycatPavingMaterial.BYTE,
+                CopycatLayerPavingService.byteStateFor(Set.of(first, second)),
+                inventory(CopycatPavingMaterial.BYTE, 1)
+            ) == PlacementResult.SUCCESS,
+            "filled Byte prevented the slope from resuming"
+        );
+        assertPartMaterial(
+            helper,
+            position,
+            CopycatByteBlock.byByte(first).getName(),
+            Blocks.GRAVEL.defaultBlockState()
+        );
+        IMultiStateCopycatBlockEntity copycat =
+            (IMultiStateCopycatBlockEntity) helper.getLevel().getBlockEntity(position);
+        var added = copycat.getMaterialItemStorage().getMaterialItem(
+            CopycatByteBlock.byByte(second).getName()
+        );
+        check(helper, added != null, "new Byte material slot is missing");
+        check(helper, !added.hasCustomMaterial(), "new Byte inherited an old material");
+        check(helper, added.consumedItem().isEmpty(), "new Byte consumed a fill block");
+        helper.succeed();
+    }
     @GameTest(template = "empty")
     public static void creativeCrateFundsCopycatShapesAndZinc(GameTestHelper helper) {
         BlockPos position = resetTarget(helper);
@@ -725,7 +833,7 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
-    public static void rollerMaterialPassChoosesClosestSurface(GameTestHelper helper) {
+    public static void rollerMaterialPassFillsEverySurfaceInWorkColumn(GameTestHelper helper) {
         BlockPos upperPosition = resetTarget(helper);
         BlockPos lowerPosition = upperPosition.below();
         helper.getLevel().setBlockAndUpdate(lowerPosition, Blocks.AIR.defaultBlockState());
@@ -754,10 +862,10 @@ public final class CopycatRollerGameTests {
             materialInventory
         );
 
-        check(helper, result.changed(), "closest Copycat surface was not filled");
+        check(helper, result.changed(), "Copycat work column was not filled");
         assertSingleMaterial(helper, upperPosition, Blocks.GRAVEL.defaultBlockState());
-        assertEmptyMaterial(helper, lowerPosition);
-        check(helper, count(materialInventory) == 1, "more than one vertical Copycat was filled");
+        assertSingleMaterial(helper, lowerPosition, Blocks.GRAVEL.defaultBlockState());
+        check(helper, count(materialInventory) == 0, "the work column used the wrong material cost");
         helper.succeed();
     }
 

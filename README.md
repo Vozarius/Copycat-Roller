@@ -33,8 +33,8 @@ space, so carriage rotation on a curve cannot build the same slope again at
 another radius. Profiles and halos are used synchronously and are never cached
 with the world or contraption. The first side Byte matches the height under the
 edge Roller; every following half-block step drops by half a block.
-Reach matches Create's normal Wide Fill radius, and obstacles stop only the
-affected branch.
+Reach matches Create's normal Wide Fill radius up to a safety cap of 16 lateral
+blocks, and obstacles stop only the affected branch.
 
 An ordinary block filter fills empty parts of existing Copycats with that
 material in both Fill and Wide Fill, and still paves non-Copycat positions

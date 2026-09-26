@@ -108,6 +108,8 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 jar {
+    exclude "dev/example/copycatroller/gametest/**"
+    exclude "data/copycat_roller/structure/**"
     manifest {
         attributes([
             "Specification-Title": mod_name,
@@ -117,6 +119,11 @@ jar {
             "Implementation-Version": project.version
         ])
     }
+}
+
+tasks.named("sourcesJar", Jar) {
+    exclude "dev/example/copycatroller/gametest/**"
+    exclude "data/copycat_roller/structure/**"
 }
 
 publishing {

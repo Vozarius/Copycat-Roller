@@ -410,12 +410,41 @@ class WideFillBytePlannerTest {
     }
 
     @Test
+    void equalDistanceOwnershipIsIndependentOfSeedOrder() {
+        var first = new WideFillBytePlanner.Seed(
+            0, 0, 0, 1, 1, false, true, true
+        );
+        var second = new WideFillBytePlanner.Seed(
+            1, 1, 0, 1, 1, false, false, false
+        );
+
+        assertEquals(
+            WideFillBytePlanner.plan(List.of(first, second), 3),
+            WideFillBytePlanner.plan(List.of(second, first), 3)
+        );
+
+        var owner = new WideFillBytePlanner.Seed(
+            0, 0, 0, 1, 0, false, true, true
+        );
+        var halo = new WideFillBytePlanner.Seed(
+            0, 0, 0, 1, 0, false, false, false
+        );
+        assertEquals(
+            WideFillBytePlanner.plan(List.of(owner, halo), 3),
+            WideFillBytePlanner.plan(List.of(halo, owner), 3)
+        );
+    }
+    @Test
     void reachMatchesCreatesWideFillRadius() {
         assertEquals(0, WideFillBytePlanner.reachBlocksForCreateDepth(0));
         assertEquals(1, WideFillBytePlanner.reachBlocksForCreateDepth(1));
         assertEquals(1, WideFillBytePlanner.reachBlocksForCreateDepth(2));
         assertEquals(2, WideFillBytePlanner.reachBlocksForCreateDepth(3));
         assertEquals(6, WideFillBytePlanner.reachBlocksForCreateDepth(12));
+        assertEquals(
+            (PavingLimits.MAX_WIDE_FILL_DEPTH + 1) / 2,
+            WideFillBytePlanner.reachBlocksForCreateDepth(Integer.MAX_VALUE)
+        );
         assertThrows(
             IllegalArgumentException.class,
             () -> WideFillBytePlanner.reachBlocksForCreateDepth(-1)

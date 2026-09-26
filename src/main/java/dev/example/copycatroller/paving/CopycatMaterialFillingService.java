@@ -33,7 +33,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -161,8 +160,9 @@ public final class CopycatMaterialFillingService {
         Level level,
         BlockPos activePosition
     ) {
-        int minimumY = activePosition.getY()
-            - AllConfigs.server().kinetics.rollerFillDepth.get();
+        int minimumY = activePosition.getY() - PavingLimits.boundedWideFillDepth(
+            AllConfigs.server().kinetics.rollerFillDepth.get()
+        );
         int maximumY = activePosition.getY() + 1;
         List<SurfaceTarget> targets = new ArrayList<>();
         for (int y = maximumY; y >= minimumY; y--) {
@@ -237,22 +237,21 @@ public final class CopycatMaterialFillingService {
                     TrackSurfaceSample::surfaceY,
                     Comparator.reverseOrder()
                 ))
-            .forEach(sample -> closestSurfaceCopycat(
+            .forEach(sample -> surfaceCopycats(
                 level,
                 sample,
                 maximumByteGap
-            )
-                .ifPresent(copycatPosition -> targetsByCopycat.putIfAbsent(
+            ).forEach(copycatPosition -> targetsByCopycat.putIfAbsent(
+                copycatPosition,
+                new SurfaceTarget(
                     copycatPosition,
-                    new SurfaceTarget(
-                        copycatPosition,
-                        new BlockPos(
-                            sample.x(),
-                            Mth.floor(sample.surfaceY()),
-                            sample.z()
-                        )
+                    new BlockPos(
+                        sample.x(),
+                        Mth.floor(sample.surfaceY()),
+                        sample.z()
                     )
-                )));
+                )
+            )));
         return targetsByCopycat.isEmpty()
             ? MaterialFillPlan.EMPTY
             : new MaterialFillPlan(List.copyOf(targetsByCopycat.values()));
@@ -284,7 +283,7 @@ public final class CopycatMaterialFillingService {
         return new FillPassResult(true, changed);
     }
 
-    private static Optional<BlockPos> closestSurfaceCopycat(
+    private static List<BlockPos> surfaceCopycats(
         Level level,
         TrackSurfaceSample sample,
         double maximumByteGap
@@ -293,15 +292,16 @@ public final class CopycatMaterialFillingService {
         double expectedMaximumTop = sample.maximumCellSurfaceY() + 1.0;
         double expectedCenterTop = sample.surfaceY() + 1.0;
         int centerY = Mth.floor(expectedCenterTop);
-        SurfaceCandidate best = null;
+        List<SurfaceCandidate> candidates = new ArrayList<>();
 
         /*
-         * The precise profile describes Create's base block while surface-only
-         * Copycats normally occupy the cell above it. Ordinary Copycats keep
-         * the narrow surface tolerance, while slope Bytes may descend through
-         * Create's configured fill depth and still belong to this column.
+         * Fill every Copycat belonging to the bounded Roller work column.
+         * Ordinary shapes retain the one-block surface tolerance, while Byte
+         * slopes may descend through the safely bounded Create fill depth.
          */
-        int fillDepth = AllConfigs.server().kinetics.rollerFillDepth.get();
+        int fillDepth = PavingLimits.boundedWideFillDepth(
+            AllConfigs.server().kinetics.rollerFillDepth.get()
+        );
         int searchDepth = Math.min(
             fillDepth + 1,
             (int) Math.ceil(maximumByteGap) + 1
@@ -329,19 +329,17 @@ public final class CopycatMaterialFillingService {
                 continue;
             }
 
-            SurfaceCandidate candidate = new SurfaceCandidate(
+            candidates.add(new SurfaceCandidate(
                 position,
                 top,
                 Math.abs(expectedCenterTop - top)
-            );
-            if (best == null
-                || candidate.distance() < best.distance() - SURFACE_EPSILON
-                || Math.abs(candidate.distance() - best.distance()) <= SURFACE_EPSILON
-                    && candidate.top() > best.top()) {
-                best = candidate;
-            }
+            ));
         }
-        return best == null ? Optional.empty() : Optional.of(best.position());
+        candidates.sort(Comparator
+            .comparingDouble(SurfaceCandidate::distance)
+            .thenComparing(SurfaceCandidate::top, Comparator.reverseOrder())
+            .thenComparingInt(candidate -> -candidate.position().getY()));
+        return candidates.stream().map(SurfaceCandidate::position).toList();
     }
 
     private static Optional<Double> copycatTop(
@@ -513,7 +511,7 @@ public final class CopycatMaterialFillingService {
             return FillResult.PASS;
         }
 
-        Optional<ItemStack> payment = acquirePayment(
+        Optional<MaterialPayment> payment = acquirePayment(
             level,
             position,
             inventory,
@@ -530,7 +528,7 @@ public final class CopycatMaterialFillingService {
             copycat.getConsumedItem().copy(),
             copycat.isCTEnabled()
         );
-        ItemStack consumedItem = payment.orElseThrow().copyWithCount(1);
+        ItemStack consumedItem = payment.orElseThrow().consumedItem();
 
         try {
             copycat.setMaterial(acceptedMaterial);
@@ -543,14 +541,36 @@ public final class CopycatMaterialFillingService {
                 acceptedMaterial,
                 filter
             )) {
-                restoreSingle(copycat, snapshot);
-                refund(level, position, inventory, payment.orElseThrow());
+                RuntimeException rollbackFailure = rollbackSingle(
+                    level,
+                    position,
+                    inventory,
+                    payment.orElseThrow(),
+                    copycat,
+                    snapshot
+                );
+                if (rollbackFailure != null) {
+                    CopycatRoller.LOGGER.error(
+                        "Copycat rollback was incomplete at {}",
+                        position,
+                        rollbackFailure
+                    );
+                }
                 logFailure("Rolled back an invalid Copycat material assignment at {}", position);
                 return FillResult.FAIL;
             }
         } catch (RuntimeException exception) {
-            restoreSingle(copycat, snapshot);
-            refund(level, position, inventory, payment.orElseThrow());
+            RuntimeException rollbackFailure = rollbackSingle(
+                level,
+                position,
+                inventory,
+                payment.orElseThrow(),
+                copycat,
+                snapshot
+            );
+            if (rollbackFailure != null) {
+                exception.addSuppressed(rollbackFailure);
+            }
             CopycatRoller.LOGGER.error(
                 "Rolled back a failed Copycat material assignment at {}",
                 position,
@@ -611,7 +631,7 @@ public final class CopycatMaterialFillingService {
             return FillResult.PASS;
         }
 
-        Optional<ItemStack> payment = acquirePayment(
+        Optional<MaterialPayment> payment = acquirePayment(
             level,
             position,
             inventory,
@@ -623,7 +643,7 @@ public final class CopycatMaterialFillingService {
             return FillResult.FAIL;
         }
 
-        ItemStack consumedItem = payment.orElseThrow().copyWithCount(1);
+        ItemStack consumedItem = payment.orElseThrow().consumedItem();
         try {
             for (PartAssignment assignment : assignments) {
                 copycat.setMaterial(assignment.property(), assignment.material());
@@ -637,14 +657,36 @@ public final class CopycatMaterialFillingService {
                 assignments,
                 filter
             )) {
-                restoreMultistate(copycat, assignments);
-                refund(level, position, inventory, payment.orElseThrow());
+                RuntimeException rollbackFailure = rollbackMultistate(
+                    level,
+                    position,
+                    inventory,
+                    payment.orElseThrow(),
+                    copycat,
+                    assignments
+                );
+                if (rollbackFailure != null) {
+                    CopycatRoller.LOGGER.error(
+                        "Multistate Copycat rollback was incomplete at {}",
+                        position,
+                        rollbackFailure
+                    );
+                }
                 logFailure("Rolled back an invalid multistate material assignment at {}", position);
                 return FillResult.FAIL;
             }
         } catch (RuntimeException exception) {
-            restoreMultistate(copycat, assignments);
-            refund(level, position, inventory, payment.orElseThrow());
+            RuntimeException rollbackFailure = rollbackMultistate(
+                level,
+                position,
+                inventory,
+                payment.orElseThrow(),
+                copycat,
+                assignments
+            );
+            if (rollbackFailure != null) {
+                exception.addSuppressed(rollbackFailure);
+            }
             CopycatRoller.LOGGER.error(
                 "Rolled back a failed multistate material assignment at {}",
                 position,
@@ -703,7 +745,7 @@ public final class CopycatMaterialFillingService {
             && ItemStack.isSameItemSameComponents(stored, filter);
     }
 
-    private static Optional<ItemStack> acquirePayment(
+    private static Optional<MaterialPayment> acquirePayment(
         Level level,
         BlockPos position,
         IItemHandler inventory,
@@ -718,44 +760,32 @@ public final class CopycatMaterialFillingService {
             return Optional.empty();
         }
 
-        int prepaidCount = prepaid.getCount();
-        int remaining = Math.max(0, count - prepaidCount);
-        if (remaining == 0) {
-            if (prepaidCount > count) {
-                refund(
-                    level,
-                    position,
-                    inventory,
-                    prepaid.copyWithCount(prepaidCount - count)
-                );
-            }
-            return Optional.of(filter.copyWithCount(count));
+        int prepaidUsed = Math.min(prepaid.getCount(), count);
+        if (prepaid.getCount() > prepaidUsed) {
+            refund(
+                level,
+                position,
+                inventory,
+                prepaid.copyWithCount(prepaid.getCount() - prepaidUsed)
+            );
         }
 
-        ItemStack simulated = ItemHelper.extract(
-            inventory,
-            stack -> ItemStack.isSameItemSameComponents(stack, filter),
-            remaining,
-            true
-        );
-        if (simulated.getCount() != remaining) {
-            refund(level, position, inventory, prepaid);
+        Optional<MountedItemTransactions.Extraction> additional =
+            MountedItemTransactions.extractExact(
+                inventory,
+                stack -> ItemStack.isSameItemSameComponents(stack, filter),
+                count - prepaidUsed
+            );
+        if (additional.isEmpty()) {
+            refund(level, position, inventory, prepaid.copyWithCount(prepaidUsed));
             return Optional.empty();
         }
 
-        ItemStack extracted = ItemHelper.extract(
-            inventory,
-            stack -> ItemStack.isSameItemSameComponents(stack, filter),
-            remaining,
-            false
-        );
-        if (extracted.getCount() != remaining) {
-            refund(level, position, inventory, extracted);
-            refund(level, position, inventory, prepaid);
-            logFailure("Mounted storage changed during material extraction at {}", position);
-            return Optional.empty();
-        }
-        return Optional.of(filter.copyWithCount(count));
+        return Optional.of(new MaterialPayment(
+            filter.copyWithCount(1),
+            prepaid.copyWithCount(prepaidUsed),
+            additional.orElseThrow()
+        ));
     }
 
     private static SingleSnapshot snapshot(MaterialItem materialItem) {
@@ -764,6 +794,58 @@ public final class CopycatMaterialFillingService {
             materialItem.consumedItem().copy(),
             materialItem.enableCT()
         );
+    }
+
+    private static RuntimeException rollbackSingle(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        MaterialPayment payment,
+        ICopycatBlockEntity copycat,
+        SingleSnapshot snapshot
+    ) {
+        RuntimeException failure = null;
+        try {
+            restoreSingle(copycat, snapshot);
+        } catch (RuntimeException exception) {
+            failure = exception;
+        }
+        try {
+            payment.rollback(level, position, inventory);
+        } catch (RuntimeException exception) {
+            if (failure == null) {
+                failure = exception;
+            } else {
+                failure.addSuppressed(exception);
+            }
+        }
+        return failure;
+    }
+
+    private static RuntimeException rollbackMultistate(
+        Level level,
+        BlockPos position,
+        IItemHandler inventory,
+        MaterialPayment payment,
+        IMultiStateCopycatBlockEntity copycat,
+        List<PartAssignment> assignments
+    ) {
+        RuntimeException failure = null;
+        try {
+            restoreMultistate(copycat, assignments);
+        } catch (RuntimeException exception) {
+            failure = exception;
+        }
+        try {
+            payment.rollback(level, position, inventory);
+        } catch (RuntimeException exception) {
+            if (failure == null) {
+                failure = exception;
+            } else {
+                failure.addSuppressed(exception);
+            }
+        }
+        return failure;
     }
 
     private static void restoreSingle(
@@ -804,11 +886,9 @@ public final class CopycatMaterialFillingService {
         if (extracted.isEmpty()) {
             return;
         }
-        ItemStack remainder = ItemHandlerHelper.insertItemStacked(
-            inventory,
-            extracted.copy(),
-            false
-        );
+        ItemStack remainder = MountedItemTransactions
+            .insertDurably(inventory, extracted.copy())
+            .remainder();
         if (remainder.isEmpty()) {
             return;
         }
@@ -970,6 +1050,44 @@ public final class CopycatMaterialFillingService {
             return baseRedirects.getOrDefault(position, position);
         }
     }
+
+    private record MaterialPayment(
+        ItemStack consumedItem,
+        ItemStack prepaid,
+        MountedItemTransactions.Extraction additional
+    ) {
+        private MaterialPayment {
+            consumedItem = consumedItem.copyWithCount(1);
+            prepaid = prepaid.copy();
+        }
+
+        private void rollback(
+            Level level,
+            BlockPos position,
+            IItemHandler inventory
+        ) {
+            RuntimeException failure = null;
+            try {
+                ItemStack additionalRemainder = additional.rollback(inventory);
+                refund(level, position, inventory, additionalRemainder);
+            } catch (RuntimeException exception) {
+                failure = exception;
+            }
+            try {
+                refund(level, position, inventory, prepaid);
+            } catch (RuntimeException exception) {
+                if (failure == null) {
+                    failure = exception;
+                } else {
+                    failure.addSuppressed(exception);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
+    }
+
     private record SingleSnapshot(
         BlockState material,
         ItemStack consumedItem,

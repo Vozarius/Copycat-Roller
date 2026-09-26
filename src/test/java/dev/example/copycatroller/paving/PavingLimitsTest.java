@@ -22,6 +22,15 @@ class PavingLimitsTest {
     }
 
     @Test
+    void arithmeticDoesNotOverflowAtCreateMaximum() {
+        assertEquals(512, PavingLimits.effectiveFillLevels(512, Integer.MAX_VALUE));
+        assertEquals(
+            PavingLimits.MAX_WIDE_FILL_DEPTH,
+            PavingLimits.boundedWideFillDepth(Integer.MAX_VALUE)
+        );
+    }
+
+    @Test
     void rejectsInvalidValues() {
         assertThrows(
             IllegalArgumentException.class,

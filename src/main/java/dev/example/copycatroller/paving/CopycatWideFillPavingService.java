@@ -373,11 +373,16 @@ public final class CopycatWideFillPavingService {
         MovementContext context,
         BlockPos position
     ) {
-        double tangentX = context.relativeMotion.x;
-        double tangentZ = context.relativeMotion.z;
+        Vec3 worldMotion = context.rotation.apply(context.relativeMotion);
+        double tangentX = worldMotion.x;
+        double tangentZ = worldMotion.z;
         if (Math.abs(tangentX) < 1.0e-9
             && Math.abs(tangentZ) < 1.0e-9) {
-            tangentX = 1;
+            Vec3 worldFacing = context.rotation.apply(Vec3.atLowerCornerOf(
+                context.state.getValue(RollerBlock.FACING).getNormal()
+            ));
+            tangentX = worldFacing.x;
+            tangentZ = worldFacing.z;
         }
         return new TrackSurfaceSample(
             position.getX(),

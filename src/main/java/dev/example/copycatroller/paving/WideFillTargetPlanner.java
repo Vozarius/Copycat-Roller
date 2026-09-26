@@ -20,8 +20,9 @@ public final class WideFillTargetPlanner {
             throw new IllegalArgumentException("maximumDepth must not be negative");
         }
 
+        int boundedDepth = PavingLimits.boundedWideFillDepth(maximumDepth);
         Map<TargetCell, TrackSurfaceSample> targets = new LinkedHashMap<>();
-        for (int depth = 0; depth <= maximumDepth; depth++) {
+        for (int depth = 0; depth <= boundedDepth; depth++) {
             int radius = (depth + 1) / 2;
             for (TrackSurfaceSample sample : centerline) {
                 int baseY = (int) Math.floor(sample.surfaceY());

@@ -108,17 +108,20 @@ public final class RollerMaterialPlacementCapture {
         capture.resolved = true;
         List<ItemStack> deductions =
             capture.inventoryBefore.deductions(capture.inventory);
-        Optional<ItemStack> selected = selectMaterial(
+        Optional<ItemStack> deductedSelection = selectMaterial(
             level,
             position,
             plannedState,
             deductions
-        ).or(() -> selectUndeductedMaterial(
-            capture.inventory,
-            level,
-            position,
-            plannedState
-        ));
+        );
+        Optional<ItemStack> selected = deductedSelection.or(() ->
+            selectUndeductedMaterial(
+                capture.inventory,
+                level,
+                position,
+                plannedState
+            )
+        );
         if (selected.isEmpty()) {
             for (ItemStack deduction : deductions) {
                 CopycatMaterialFillingService.refundObservedExtraction(
@@ -139,7 +142,9 @@ public final class RollerMaterialPlacementCapture {
                     level,
                     position,
                     material.copyWithCount(1),
-                    material,
+                    deductedSelection.isPresent()
+                        ? material.copyWithCount(1)
+                        : ItemStack.EMPTY,
                     capture.inventory
                 );
             capture.outcome = switch (result) {

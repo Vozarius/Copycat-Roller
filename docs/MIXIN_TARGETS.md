@@ -33,7 +33,9 @@ four mixin classes only when both `create` and `copycats` are present in
      filter in `STRAIGHT_FILL`, it builds only the geometric Copycat plan,
      obtains Create's provisional paving state, and runs the real `tryFill`
      transaction for every planned Copycat position. It does not interpret
-     third-party filter data. Non-zinc `WIDE_FILL` is not intercepted.
+     third-party filter data. In non-zinc `WIDE_FILL`, only this bounded
+     material/protection plan is added; all remaining targets continue through
+     Create's original Wide Fill implementation.
    - `RETURN` injection: preserves `WaitingTicks`, `LastPos`, and stalling when
      material assignment was the only successful change in the pass.
    - `@ModifyArg`, second `tryFill` invocation (`ordinal=1`, argument index 1):

@@ -57,17 +57,21 @@
 11. GameTests integrate the real registry, block entities, mixins,
     `TrackPaverV2`, and dedicated server. Most consumption and placement
     operations invoke the service directly so that the suite does not depend
-    on the timing of a fully assembled moving train. A separate conditional
+    on the timing of a fully assembled moving train. A separate optional
     integration test runs the actual Create `tryFill` transaction with Create:
-    Randomize Filters 1.0.7. The straight, diagonal, and Bezier X/Z profiles
-    are tested separately against Create's real `PaveTask`.
+    Randomize Filters 1.0.7 when that mod is installed. If it is absent, the
+    test is reported as an optional failure rather than a successful
+    compatibility check. The straight, diagonal, and Bezier X/Z profiles are
+    tested separately against Create's real `PaveTask`.
 
 12. Automatic material filling is active in `STRAIGHT_FILL` and `WIDE_FILL`.
     Each material Roller scans its real X/Z work column from one cell above
     Create's active paving position down through the configured
-    `rollerFillDepth`, selecting every `copycat_byte` rather than only the
-    nearest profile match. The exact track profile is still used to find other
-    Copycat shapes. Selected cells are passed through Create's real Roller
+    safely bounded `rollerFillDepth`, selecting every `copycat_byte` rather
+    than only the nearest profile match. The exact track profile finds every
+    other Copycat surface inside the same bounded work column, while the
+    one-block surface tolerance still excludes unrelated deep decoration.
+    Selected cells are passed through Create's real Roller
     placement transaction to discover the block chosen for that position, then
     their paving columns are protected from the later ordinary pass. Every
     target without a selected Copycat continues through Create's original
@@ -124,8 +128,10 @@
     unsupported cells are rejected, while minimal support chains keep visible
     outer bands reachable. The first side Byte matches the central surface
     height; every following half-block step lowers by one half block. Maximum
-    reach is `(rollerFillDepth + 1) / 2` blocks, matching Create's Wide Fill
-    radius. A solid obstacle terminates only the affected branch, which
+    reach follows `(rollerFillDepth + 1) / 2` blocks up to the add-on safety
+    cap of 32 depth levels (16 lateral blocks). This cap prevents overflow,
+    unbounded allocations, and multi-second server ticks from pathological
+    Create configuration values. A solid obstacle terminates only the affected branch, which
     prevents placement through walls but can leave an intentional opening.
 17. Copycat Byte is reserved for automatic zinc Wide Fill and is not accepted
     as a direct Roller filter. Ordinary block filters in Wide Fill additionally

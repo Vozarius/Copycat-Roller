@@ -26,7 +26,8 @@ public final class WideFillBytePlanner {
         if (createRollerFillDepth < 0) {
             throw new IllegalArgumentException("createRollerFillDepth must not be negative");
         }
-        return (createRollerFillDepth + 1) / 2;
+        int boundedDepth = PavingLimits.boundedWideFillDepth(createRollerFillDepth);
+        return (boundedDepth + 1) / 2;
     }
 
     public static List<ByteCell> plan(
@@ -490,9 +491,58 @@ public final class WideFillBytePlanner {
                 ? candidate
                 : current;
         }
-        return candidate.source().lowerHalfY() > current.source().lowerHalfY()
+        int comparison = Integer.compare(
+            candidate.source().lowerHalfY(),
+            current.source().lowerHalfY()
+        );
+        if (comparison != 0) {
+            return comparison > 0 ? candidate : current;
+        }
+
+        // Equal-distance Voronoi boundaries must not depend on seed order.
+        // Prefer a source that can actually emit towards this cell, then a
+        // writable core owner, and finally a stable geometric key.
+        comparison = Boolean.compare(canEmitTowards(candidate), canEmitTowards(current));
+        if (comparison != 0) {
+            return comparison > 0 ? candidate : current;
+        }
+        comparison = Boolean.compare(
+            candidate.source().outputOwner(),
+            current.source().outputOwner()
+        );
+        if (comparison != 0) {
+            return comparison > 0 ? candidate : current;
+        }
+        return compareSource(candidate.source(), current.source()) < 0
             ? candidate
             : current;
+    }
+
+    private static boolean canEmitTowards(NearestSource owner) {
+        if (Math.abs(owner.side()) <= SIDE_EPSILON) {
+            return false;
+        }
+        return owner.side() > 0
+            ? owner.source().allowPositiveLateral()
+            : owner.source().allowNegativeLateral();
+    }
+
+    private static int compareSource(SourceVoxel left, SourceVoxel right) {
+        int comparison = Integer.compare(left.column().x(), right.column().x());
+        if (comparison != 0) return comparison;
+        comparison = Integer.compare(left.column().z(), right.column().z());
+        if (comparison != 0) return comparison;
+        comparison = Integer.compare(left.lowerHalfY(), right.lowerHalfY());
+        if (comparison != 0) return comparison;
+        comparison = Double.compare(left.normalX(), right.normalX());
+        if (comparison != 0) return comparison;
+        comparison = Double.compare(left.normalZ(), right.normalZ());
+        if (comparison != 0) return comparison;
+        comparison = Boolean.compare(left.allowNegativeLateral(), right.allowNegativeLateral());
+        if (comparison != 0) return -comparison;
+        comparison = Boolean.compare(left.allowPositiveLateral(), right.allowPositiveLateral());
+        if (comparison != 0) return -comparison;
+        return -Boolean.compare(left.outputOwner(), right.outputOwner());
     }
 
     private static int radialDistance(double squaredDistance) {

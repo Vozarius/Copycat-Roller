@@ -14,7 +14,6 @@ import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopyca
 import com.simibubi.create.AllItems;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
-import com.simibubi.create.foundation.item.ItemHelper;
 import com.simibubi.create.infrastructure.config.AllConfigs;
 import dev.example.copycatroller.CopycatRoller;
 import dev.example.copycatroller.CopycatRollerConfig;
@@ -28,7 +27,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Half;
 import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -377,10 +375,6 @@ public final class CopycatLayerPavingService {
                 logFailure("{} at {} has no compatible Copycats+ block entity", material, position);
                 return PlacementResult.FAIL;
             }
-            if (!isEmptyCopycat(copycat)) {
-                return PlacementResult.FAIL;
-            }
-
             Optional<BlockState> merged = mergeExisting(material, oldState, requestedState);
             if (merged.isEmpty()) {
                 return PlacementResult.FAIL;
@@ -389,6 +383,14 @@ public final class CopycatLayerPavingService {
             oldUnits = itemUnits(material, oldState);
             if (targetState.equals(oldState)) {
                 return PlacementResult.PASS;
+            }
+            // A filled Byte may be resumed later after resources are replenished.
+            // Copycats+ stores every bite independently, so adding an empty bite
+            // preserves the already filled parts. Single-state shapes cannot be
+            // enlarged safely after their one material assignment.
+            if (!isEmptyCopycat(copycat)
+                && material != CopycatPavingMaterial.BYTE) {
+                return PlacementResult.FAIL;
             }
         } else {
             if (level.getBlockEntity(position) != null) {
@@ -416,20 +418,40 @@ public final class CopycatLayerPavingService {
             return PlacementResult.FAIL;
         }
 
-        boolean stateChanged = level.setBlockAndUpdate(position, targetState);
-        if (!stateChanged
-            || !level.getBlockState(position).equals(targetState)
-            || !(level.getBlockEntity(position) instanceof ICopycatBlockEntity copycat)
-            || !material.hasExpectedBlockEntity(copycat)
-            || !isEmptyCopycat(copycat)) {
-            level.setBlockAndUpdate(position, oldState);
+        boolean extendingFilledByte = material == CopycatPavingMaterial.BYTE
+            && oldState.is(material.itemBlock())
+            && level.getBlockEntity(position) instanceof ICopycatBlockEntity oldCopycat
+            && !isEmptyCopycat(oldCopycat);
+        try {
+            boolean stateChanged = level.setBlockAndUpdate(position, targetState);
+            if (!stateChanged
+                || !level.getBlockState(position).equals(targetState)
+                || !(level.getBlockEntity(position) instanceof ICopycatBlockEntity copycat)
+                || !material.hasExpectedBlockEntity(copycat)
+                || (!extendingFilledByte && !isEmptyCopycat(copycat))) {
+                level.setBlockAndUpdate(position, oldState);
+                payment.orElseThrow().rollback();
+                logFailure("Rolled back invalid {} placement at {}", material, position);
+                return PlacementResult.FAIL;
+            }
+
+            copycat.notifyUpdate();
+            return PlacementResult.SUCCESS;
+        } catch (RuntimeException exception) {
+            try {
+                level.setBlockAndUpdate(position, oldState);
+            } catch (RuntimeException restoreFailure) {
+                exception.addSuppressed(restoreFailure);
+            }
             payment.orElseThrow().rollback();
-            logFailure("Rolled back invalid {} placement at {}", material, position);
+            CopycatRoller.LOGGER.error(
+                "Rolled back failed {} placement at {}",
+                material,
+                position,
+                exception
+            );
             return PlacementResult.FAIL;
         }
-
-        copycat.notifyUpdate();
-        return PlacementResult.SUCCESS;
     }
 
     public static Optional<BlockState> upperStateFor(
@@ -745,36 +767,23 @@ public final class CopycatLayerPavingService {
         CopycatPavingMaterial material,
         int itemCost
     ) {
-        ItemStack simulated = ItemHelper.extract(
-            inventory,
-            material.itemPredicate(),
-            itemCost,
-            true
-        );
-        if (simulated.getCount() != itemCost) {
+        Optional<MountedItemTransactions.Extraction> extraction =
+            MountedItemTransactions.extractExact(
+                inventory,
+                material.itemPredicate(),
+                itemCost
+            );
+        if (extraction.isEmpty()) {
             return Optional.empty();
         }
-
-        /*
-         * Create's exact ItemHelper extraction performs its own complete
-         * preflight before mutating the synchronous mounted handler. No other
-         * server task can interleave between that preflight and its slot
-         * mutations.
-         */
-        ItemStack extracted = ItemHelper.extract(
+        MountedItemTransactions.Extraction paid = extraction.orElseThrow();
+        return Optional.of(() -> refundExtraction(
+            level,
+            position,
             inventory,
-            material.itemPredicate(),
-            itemCost,
-            false
-        );
-        if (extracted.getCount() != itemCost) {
-            refund(level, position, inventory, extracted, material);
-            logFailure("Mounted storage changed during extraction at {}", position);
-            return Optional.empty();
-        }
-        return Optional.of(() ->
-            refund(level, position, inventory, extracted, material)
-        );
+            paid,
+            material.toString()
+        ));
     }
 
     private static Optional<PaymentReceipt> payWithZinc(
@@ -803,98 +812,56 @@ public final class CopycatLayerPavingService {
         ZincCreditMath.PaymentPlan plan =
             ZincCreditMath.plan(requiredCredits, availableHalfLayers);
 
-        if (plan.halfLayersToConsume() > 0) {
-            ItemStack simulatedHalfLayers = ItemHelper.extract(
+        Optional<MountedItemTransactions.Extraction> halfLayerExtraction =
+            MountedItemTransactions.extractExact(
                 inventory,
                 CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
-                plan.halfLayersToConsume(),
-                true
+                plan.halfLayersToConsume()
             );
-            if (simulatedHalfLayers.getCount() != plan.halfLayersToConsume()) {
-                return Optional.empty();
-            }
-        }
-        if (plan.zincIngotsToConsume() > 0) {
-            ItemStack simulatedZinc = ItemHelper.extract(
-                inventory,
-                CopycatLayerPavingService::isZincIngot,
-                plan.zincIngotsToConsume(),
-                true
-            );
-            if (simulatedZinc.getCount() != plan.zincIngotsToConsume()) {
-                return Optional.empty();
-            }
-        }
-
-        ItemStack extractedHalfLayers = plan.halfLayersToConsume() == 0
-            ? ItemStack.EMPTY
-            : ItemHelper.extract(
-                inventory,
-                CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
-                plan.halfLayersToConsume(),
-                false
-            );
-        if (extractedHalfLayers.getCount() != plan.halfLayersToConsume()) {
-            refundStack(
-                level,
-                position,
-                inventory,
-                extractedHalfLayers,
-                "zinc paving half-layer credits"
-            );
-            logFailure("Half-layer credit storage changed at {}", position);
+        if (halfLayerExtraction.isEmpty()) {
             return Optional.empty();
         }
+        MountedItemTransactions.Extraction extractedHalfLayers =
+            halfLayerExtraction.orElseThrow();
 
-        ItemStack extractedZinc = plan.zincIngotsToConsume() == 0
-            ? ItemStack.EMPTY
-            : ItemHelper.extract(
+        Optional<MountedItemTransactions.Extraction> zincExtraction =
+            MountedItemTransactions.extractExact(
                 inventory,
                 CopycatLayerPavingService::isZincIngot,
-                plan.zincIngotsToConsume(),
-                false
+                plan.zincIngotsToConsume()
             );
-        if (extractedZinc.getCount() != plan.zincIngotsToConsume()) {
-            refundStack(
+        if (zincExtraction.isEmpty()) {
+            refundExtraction(
                 level,
                 position,
                 inventory,
                 extractedHalfLayers,
                 "zinc paving half-layer credits"
             );
-            refundStack(
-                level,
-                position,
-                inventory,
-                extractedZinc,
-                "zinc paving ingots"
-            );
-            logFailure("Zinc storage changed during extraction at {}", position);
             return Optional.empty();
         }
+        MountedItemTransactions.Extraction extractedZinc =
+            zincExtraction.orElseThrow();
 
-        /*
-         * Extracting the zinc can itself free the slot needed for change, so
-         * insertion cannot be preflighted against the unmodified handler.
-         * Mounted storage is mutated synchronously on the server thread: if
-         * change insertion fails, the code below removes its partial insert
-         * and restores both extracted inputs before returning FAIL.
-         */
-        ItemStack change = halfLayerStack(plan.halfLayerChange());
-        ItemStack changeRemainder = change.isEmpty()
-            ? ItemStack.EMPTY
-            : ItemHandlerHelper.insertItemStacked(inventory, change.copy(), false);
-        if (!changeRemainder.isEmpty()) {
-            int insertedChange = change.getCount() - changeRemainder.getCount();
-            removeHalfLayerChange(inventory, insertedChange, position);
-            refundStack(
+        // Infinite sources do not lose an ingot and therefore need no stored
+        // conversion remainder. Finite zinc must preserve every unused item.
+        ItemStack change = extractedZinc.cameFromFiniteStorage()
+            ? halfLayerStack(plan.halfLayerChange())
+            : ItemStack.EMPTY;
+        MountedItemTransactions.Insertion storedChange =
+            MountedItemTransactions.insertDurably(inventory, change);
+        if (!storedChange.complete()) {
+            if (!storedChange.rollback(inventory)) {
+                logFailure("Could not roll back half-layer change at {}", position);
+            }
+            refundExtraction(
                 level,
                 position,
                 inventory,
                 extractedHalfLayers,
                 "zinc paving half-layer credits"
             );
-            refundStack(
+            refundExtraction(
                 level,
                 position,
                 inventory,
@@ -906,15 +873,17 @@ public final class CopycatLayerPavingService {
         }
 
         return Optional.of(() -> {
-            removeHalfLayerChange(inventory, change.getCount(), position);
-            refundStack(
+            if (!storedChange.rollback(inventory)) {
+                logFailure("Could not remove rolled-back half-layer change at {}", position);
+            }
+            refundExtraction(
                 level,
                 position,
                 inventory,
                 extractedHalfLayers,
                 "zinc paving half-layer credits"
             );
-            refundStack(
+            refundExtraction(
                 level,
                 position,
                 inventory,
@@ -938,73 +907,58 @@ public final class CopycatLayerPavingService {
         ZincByteMath.PaymentPlan plan =
             ZincByteMath.plan(requiredBytes, availableBytes);
 
-        if (plan.bytesToConsume() > 0) {
-            ItemStack simulatedBytes = ItemHelper.extract(
+        Optional<MountedItemTransactions.Extraction> byteExtraction =
+            MountedItemTransactions.extractExact(
                 inventory,
                 CopycatPavingMaterial.BYTE.itemPredicate(),
-                plan.bytesToConsume(),
-                true
+                plan.bytesToConsume()
             );
-            if (simulatedBytes.getCount() != plan.bytesToConsume()) {
-                return Optional.empty();
-            }
-        }
-        if (plan.zincIngotsToConsume() > 0) {
-            ItemStack simulatedZinc = ItemHelper.extract(
-                inventory,
-                CopycatLayerPavingService::isZincIngot,
-                plan.zincIngotsToConsume(),
-                true
-            );
-            if (simulatedZinc.getCount() != plan.zincIngotsToConsume()) {
-                return Optional.empty();
-            }
-        }
-
-        ItemStack extractedBytes = plan.bytesToConsume() == 0
-            ? ItemStack.EMPTY
-            : ItemHelper.extract(
-                inventory,
-                CopycatPavingMaterial.BYTE.itemPredicate(),
-                plan.bytesToConsume(),
-                false
-            );
-        if (extractedBytes.getCount() != plan.bytesToConsume()) {
-            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
+        if (byteExtraction.isEmpty()) {
             return Optional.empty();
         }
+        MountedItemTransactions.Extraction extractedBytes =
+            byteExtraction.orElseThrow();
 
-        ItemStack extractedZinc = plan.zincIngotsToConsume() == 0
-            ? ItemStack.EMPTY
-            : ItemHelper.extract(
+        Optional<MountedItemTransactions.Extraction> zincExtraction =
+            MountedItemTransactions.extractExact(
                 inventory,
                 CopycatLayerPavingService::isZincIngot,
-                plan.zincIngotsToConsume(),
-                false
+                plan.zincIngotsToConsume()
             );
-        if (extractedZinc.getCount() != plan.zincIngotsToConsume()) {
-            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
-            refundStack(level, position, inventory, extractedZinc, "zinc paving ingots");
+        if (zincExtraction.isEmpty()) {
+            refundExtraction(
+                level,
+                position,
+                inventory,
+                extractedBytes,
+                "zinc paving Byte items"
+            );
             return Optional.empty();
         }
+        MountedItemTransactions.Extraction extractedZinc =
+            zincExtraction.orElseThrow();
 
-        ItemStack change = byteStack(plan.byteChange());
-        ItemStack changeRemainder = change.isEmpty()
-            ? ItemStack.EMPTY
-            : ItemHandlerHelper.insertItemStacked(inventory, change.copy(), false);
-        if (!changeRemainder.isEmpty()) {
-            int insertedChange = change.getCount() - changeRemainder.getCount();
-            removeByteChange(inventory, insertedChange, position);
-            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
-            refundStack(level, position, inventory, extractedZinc, "zinc paving ingots");
+        ItemStack change = extractedZinc.cameFromFiniteStorage()
+            ? byteStack(plan.byteChange())
+            : ItemStack.EMPTY;
+        MountedItemTransactions.Insertion storedChange =
+            MountedItemTransactions.insertDurably(inventory, change);
+        if (!storedChange.complete()) {
+            if (!storedChange.rollback(inventory)) {
+                logFailure("Could not roll back Copycat Byte change at {}", position);
+            }
+            refundExtraction(level, position, inventory, extractedBytes, "zinc paving Byte items");
+            refundExtraction(level, position, inventory, extractedZinc, "zinc paving ingots");
             logFailure("Could not store Copycat Byte conversion remainder at {}", position);
             return Optional.empty();
         }
 
         return Optional.of(() -> {
-            removeByteChange(inventory, change.getCount(), position);
-            refundStack(level, position, inventory, extractedBytes, "zinc paving Byte items");
-            refundStack(level, position, inventory, extractedZinc, "zinc paving ingots");
+            if (!storedChange.rollback(inventory)) {
+                logFailure("Could not remove rolled-back Copycat Byte change at {}", position);
+            }
+            refundExtraction(level, position, inventory, extractedBytes, "zinc paving Byte items");
+            refundExtraction(level, position, inventory, extractedZinc, "zinc paving ingots");
         });
     }
 
@@ -1041,53 +995,10 @@ public final class CopycatLayerPavingService {
             );
     }
 
-    private static void removeByteChange(
-        IItemHandler inventory,
-        int count,
-        BlockPos position
+    private static int itemUnits(
+        CopycatPavingMaterial material,
+        BlockState state
     ) {
-        if (count == 0) {
-            return;
-        }
-        ItemStack removed = ItemHelper.extract(
-            inventory,
-            CopycatPavingMaterial.BYTE.itemPredicate(),
-            count,
-            false
-        );
-        if (removed.getCount() != count) {
-            logFailure(
-                "Could not roll back {} Copycat Byte change items at {}",
-                count,
-                position
-            );
-        }
-    }
-
-    private static void removeHalfLayerChange(
-        IItemHandler inventory,
-        int count,
-        BlockPos position
-    ) {
-        if (count == 0) {
-            return;
-        }
-        ItemStack removed = ItemHelper.extract(
-            inventory,
-            CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
-            count,
-            false
-        );
-        if (removed.getCount() != count) {
-            logFailure(
-                "Could not roll back {} half-layer change items at {}",
-                count,
-                position
-            );
-        }
-    }
-
-    private static int itemUnits(CopycatPavingMaterial material, BlockState state) {
         return switch (material) {
             case LAYER -> state.getValue(CopycatLayerBlock.LAYERS);
             case HALF_LAYER ->
@@ -1138,42 +1049,30 @@ public final class CopycatLayerPavingService {
         }
     }
 
-    private static void refund(
+    private static void refundExtraction(
         Level level,
         BlockPos position,
         IItemHandler inventory,
-        ItemStack extracted,
-        CopycatPavingMaterial material
-    ) {
-        refundStack(level, position, inventory, extracted, material.toString());
-    }
-
-    private static void refundStack(
-        Level level,
-        BlockPos position,
-        IItemHandler inventory,
-        ItemStack extracted,
+        MountedItemTransactions.Extraction extraction,
         String description
     ) {
-        if (extracted.isEmpty()) {
+        ItemStack remainder = extraction.rollback(inventory);
+        if (remainder.isEmpty()) {
             return;
         }
-        ItemStack remainder = ItemHandlerHelper.insertItemStacked(inventory, extracted.copy(), false);
-        if (!remainder.isEmpty()) {
-            Containers.dropItemStack(
-                level,
-                position.getX() + 0.5,
-                position.getY() + 0.5,
-                position.getZ() + 0.5,
-                remainder
-            );
-            CopycatRoller.LOGGER.error(
-                "Could not return {} {} items to mounted storage; dropped them at {}",
-                remainder.getCount(),
-                description,
-                position
-            );
-        }
+        Containers.dropItemStack(
+            level,
+            position.getX() + 0.5,
+            position.getY() + 0.5,
+            position.getZ() + 0.5,
+            remainder
+        );
+        CopycatRoller.LOGGER.error(
+            "Could not return {} {} items to mounted storage; dropped them at {}",
+            remainder.getCount(),
+            description,
+            position
+        );
     }
 
     private static void logFailure(String message, Object... arguments) {

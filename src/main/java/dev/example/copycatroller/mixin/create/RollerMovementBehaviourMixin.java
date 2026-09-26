@@ -1,5 +1,7 @@
 package dev.example.copycatroller.mixin.create;
 
+import java.lang.ref.WeakReference;
+
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
 import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
@@ -166,7 +168,7 @@ public abstract class RollerMovementBehaviourMixin {
             }
         }
         copycatRoller$materialPass.set(new MaterialPassState(
-            context,
+            new WeakReference<>(context),
             plan,
             changed
         ));
@@ -203,7 +205,7 @@ public abstract class RollerMovementBehaviourMixin {
 
         MaterialPassState pass = copycatRoller$materialPass.get();
         if (pass != null
-            && pass.context() == context
+            && pass.context().get() == context
             && pass.plan().protects(targetPosition)) {
             callback.setReturnValue(RollerMaterialPlacementCapture.passResult());
         }
@@ -313,7 +315,7 @@ public abstract class RollerMovementBehaviourMixin {
         MaterialPassState pass = copycatRoller$materialPass.get();
         copycatRoller$materialPass.remove();
         if (pass != null
-            && pass.context() == context
+            && pass.context().get() == context
             && pass.materialChanged()
             && !context.world.isClientSide) {
             copycatRoller$markPaved(context, position);
@@ -332,7 +334,7 @@ public abstract class RollerMovementBehaviourMixin {
 
     @Unique
     private record MaterialPassState(
-        MovementContext context,
+        WeakReference<MovementContext> context,
         MaterialFillPlan plan,
         boolean materialChanged
     ) {

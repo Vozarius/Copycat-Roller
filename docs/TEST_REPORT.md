@@ -17,13 +17,16 @@ Release verification environment:
 .\gradlew.bat runGameTestServer --console=plain
 ```
 
-The final version 2.0 build completed successfully. All 52 unit tests passed
+The final version 2.0 build completed successfully. All 54 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
-loaded Copycat Roller 2.0, Create 6, and Copycats+ 3.0.9, then passed all
-65/65 required GameTests in 1.024 seconds. The server run also verifies that
-common code does not load client-only classes.
+loaded Copycat Roller 2.0, Create 6.0.10, and Copycats+ 3.0.9, then completed
+67 registered GameTests in 1.266 seconds with every required test passing.
+The Randomize Filters integration was reported as one optional failure because
+that optional mod was not installed; it is no longer counted as verified. The
+server run also verifies that common code does not load client-only classes.
 
-The final clean build took 10 seconds; the dedicated GameTest run took 27 seconds.
+The final clean build took 12 seconds; the dedicated GameTest run took
+34 seconds.
 
 ## Version 2.0 coverage
 
@@ -36,7 +39,9 @@ The new unit tests verify:
 - one-sided seeds emit only outward and interior seeds emit no slope;
 - the first side Byte matches the central height;
 - each following outward half-block step lowers the surface by half a block;
-- the reach formula matches Create's Wide Fill radius;
+- the reach formula matches Create's Wide Fill radius within the safety cap;
+- equal-distance source selection is deterministic for every seed order;
+- extreme Create fill-depth values are capped without integer overflow;
 - adjacent longitudinal track samples merge into one lateral shell;
 - non-emitting profiles from every Roller reserve the combined central mask
   without blocking the selected outer side;
@@ -71,6 +76,10 @@ The new GameTests verify:
 - eight Byte parts consume exactly one ingot with no change;
 - an inventory that cannot hold the change leaves both inventory and world
   unchanged;
+- finite zinc mixed with an unrelated Creative Crate cannot lose conversion
+  change or report a false successful placement;
+- a partially built and already filled Byte can be extended after resources
+  are replenished without replacing its stored material;
 - `WIDE_FILL` remains a separately guarded mode in the runtime enum order;
 - Copycat Byte is internal to zinc Wide Fill and is not accepted as a direct
   Roller filter;
@@ -96,7 +105,9 @@ The new GameTests verify:
   pave the ordinary upper target, and creates no support ray below the Byte;
 - one material Roller fills every Byte in its real vertical work column and
   charges each part, while every Byte redirects only its own paving level so a
-  deeper Byte cannot create radial or vertical fill rays.
+  deeper Byte cannot create radial or vertical fill rays;
+- every eligible non-Byte Copycat in the bounded work column is filled while
+  the surface tolerance continues to exclude unrelated deep decoration.
 
 The existing suite still covers precise straight, diagonal, and Bezier track
 profiles, Layer/Half Layer/Slope Layer geometry, atomic inventory handling,
@@ -106,10 +117,14 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-2.0.jar` — 171,972 bytes
-  - SHA-256: `040ED7878E89AAEAA9D7E5113F6D0EFF303AD29935255EDB81415943494F2386`
-- `build/libs/copycat_roller-2.0-sources.jar` — 69,007 bytes
-  - SHA-256: `5F4FF6754070248E0ECEE0C9ABCE4D71143F4274E0AFC8D51389C8F5702E494C`
+- `build/libs/copycat_roller-2.0.jar` — 147,050 bytes
+  - SHA-256: `4B4DB5900300B89A6D5579B693797931726A424E8865992C6A96CE8FC6AE99EF`
+- `build/libs/copycat_roller-2.0-sources.jar` — 54,676 bytes
+  - SHA-256: `87AFD0FEC1D0BA11F2A8E50CC7625CD4076EFED491DD4606D4E26408DFDAAF45`
+
+The production JAR contains no GameTest classes or test structures. Its
+NeoForge metadata identifies only `copycat_roller`; the unrelated root
+Randomize Filters metadata has been removed from the repository.
 
 Warnings printed by Copycats+, Flywheel, and Ponder concern their own mixin
 compatibility metadata and development refmaps. They also occur without this
