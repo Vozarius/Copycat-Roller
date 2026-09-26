@@ -2429,6 +2429,58 @@ public final class CopycatRollerGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void straightEdgeEndPlacesEveryByteOnFirstPass(GameTestHelper helper) {
+        Level level = helper.getLevel();
+        BearingContraption contraption = new BearingContraption();
+        contraption.getStorage().initialize();
+        ItemStackHandler inventory = zincInventory(4, 64);
+        contraption.getStorage().attachExternal(inventory);
+        CompoundTag data = new CompoundTag();
+        data.putInt("ScrollValue", 2);
+        BlockState state = AllBlocks.MECHANICAL_ROLLER.getDefaultState()
+            .setValue(RollerBlock.FACING, Direction.NORTH);
+        MovementContext outer = rollerContext(level, contraption, state, data, -1);
+        MovementContext inner = rollerContext(level, contraption, state, data, 0);
+        BlockPos start = helper.absolutePos(new BlockPos(1, 10, 1));
+        Vec3 first = Vec3.atCenterOf(start);
+        Vec3 last = first.add(8, 0, 0);
+        TrackGraph graph = new TrackGraph();
+        TrackEdge edge = new TrackEdge(node(level, first, 121), node(level, last, 122),
+            null, TrackMaterial.ANDESITE);
+        PaveTask outerProfile = new PaveTask(1, 1);
+        PaveTask innerProfile = new PaveTask(0, 0);
+        TrackPaverV2.pave(outerProfile, graph, edge, 6.5, 8);
+        TrackPaverV2.pave(innerProfile, graph, edge, 6.5, 8);
+        check(helper, CopycatWideFillPavingService.pave(outer, start, outerProfile,
+            actor -> actor == inner ? innerProfile : outerProfile), "straight profile placed nothing");
+
+        int halfSteps = 2 * dev.example.copycatroller.paving.WideFillBytePlanner.reachBlocksForCreateDepth(
+            com.simibubi.create.infrastructure.config.AllConfigs.server().kinetics.rollerFillDepth.get());
+        for (var column : outerProfile.keys()) {
+            for (int xHalf = 0; xHalf < 2; xHalf++) {
+                for (int distance = 1; distance <= halfSteps; distance++) {
+                    int x = 2 * column.getFirst() + xHalf;
+                    int z = 2 * column.getSecond() + 1 + distance;
+                    int y = 2 * (int) outerProfile.get(column) + 2 - distance;
+                    BlockPos position = new BlockPos(Math.floorDiv(x, 2), Math.floorDiv(y, 2), Math.floorDiv(z, 2));
+                    var bite = CopycatByteBlock.bite(Math.floorMod(x, 2) == 1,
+                        Math.floorMod(y, 2) == 1, Math.floorMod(z, 2) == 1);
+                    BlockState actual = level.getBlockState(position);
+                    check(helper, actual.is(CCBlocks.COPYCAT_BYTE.get()) && actual.getValue(CopycatByteBlock.byByte(bite)),
+                        "straight edge left a missing Byte at " + position + " distance=" + distance);
+                }
+            }
+        }
+        int zincAfter = countZinc(inventory);
+        int bytesAfter = countMaterial(inventory, CopycatPavingMaterial.BYTE);
+        check(helper, !CopycatWideFillPavingService.pave(outer, start, outerProfile,
+            actor -> actor == inner ? innerProfile : outerProfile), "repeat pass rebuilt straight slope");
+        check(helper, zincAfter == countZinc(inventory)
+            && bytesAfter == countMaterial(inventory, CopycatPavingMaterial.BYTE), "repeat pass charged resources");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void onlyEndsOfRollerRowOwnWideFillSides(GameTestHelper helper) {
         List<BlockPos> row = List.of(
             new BlockPos(-2, 4, 7),

@@ -28,4 +28,15 @@ public final class PavingLimits {
         }
         return Math.min(createRollerFillDepth, MAX_WIDE_FILL_DEPTH);
     }
+    /** Bound in floating point before converting, so even an enormous gap cannot overflow. */
+    public static int surfaceSearchDepth(int createRollerFillDepth, double maximumGap) {
+        if (Double.isNaN(maximumGap) || maximumGap < 0) {
+            throw new IllegalArgumentException("maximumGap must not be negative or NaN");
+        }
+        return (int) Math.min(
+            boundedWideFillDepth(createRollerFillDepth) + 1.0,
+            Math.ceil(maximumGap) + 1.0
+        );
+    }
+
 }

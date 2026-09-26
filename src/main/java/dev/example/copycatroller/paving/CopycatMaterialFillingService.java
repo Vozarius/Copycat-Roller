@@ -19,7 +19,6 @@ import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopyca
 import com.copycatsplus.copycats.foundation.copycat.multistate.MaterialItemStorage;
 import com.copycatsplus.copycats.foundation.copycat.multistate.MaterialItemStorage.MaterialItem;
 import com.simibubi.create.content.contraptions.actors.roller.PaveTask;
-import com.simibubi.create.foundation.item.ItemHelper;
 import com.simibubi.create.infrastructure.config.AllConfigs;
 import dev.example.copycatroller.CopycatRoller;
 import dev.example.copycatroller.CopycatRollerConfig;
@@ -215,7 +214,7 @@ public final class CopycatMaterialFillingService {
         return planSamplesForAnyFilter(
             level,
             samples,
-            AllConfigs.server().kinetics.rollerFillDepth.get() + 1.0
+            PavingLimits.boundedWideFillDepth(AllConfigs.server().kinetics.rollerFillDepth.get()) + 1.0
         );
     }
 
@@ -299,14 +298,12 @@ public final class CopycatMaterialFillingService {
          * Ordinary shapes retain the one-block surface tolerance, while Byte
          * slopes may descend through the safely bounded Create fill depth.
          */
-        int fillDepth = PavingLimits.boundedWideFillDepth(
-            AllConfigs.server().kinetics.rollerFillDepth.get()
+        int searchDepth = PavingLimits.surfaceSearchDepth(
+            AllConfigs.server().kinetics.rollerFillDepth.get(), maximumByteGap
         );
-        int searchDepth = Math.min(
-            fillDepth + 1,
-            (int) Math.ceil(maximumByteGap) + 1
-        );
-        for (int y = centerY - searchDepth; y <= centerY; y++) {
+        int minimumY = Math.max(level.getMinBuildHeight(), centerY - searchDepth);
+        int maximumY = Math.min(level.getMaxBuildHeight() - 1, centerY);
+        for (int y = minimumY; y <= maximumY; y++) {
             BlockPos position = new BlockPos(sample.x(), y, sample.z());
             if (!level.isLoaded(position)) {
                 continue;
@@ -559,6 +556,7 @@ public final class CopycatMaterialFillingService {
                 logFailure("Rolled back an invalid Copycat material assignment at {}", position);
                 return FillResult.FAIL;
             }
+            copycat.notifyUpdate();
         } catch (RuntimeException exception) {
             RuntimeException rollbackFailure = rollbackSingle(
                 level,
@@ -579,7 +577,6 @@ public final class CopycatMaterialFillingService {
             return FillResult.FAIL;
         }
 
-        copycat.notifyUpdate();
         return FillResult.SUCCESS;
     }
 
@@ -675,6 +672,7 @@ public final class CopycatMaterialFillingService {
                 logFailure("Rolled back an invalid multistate material assignment at {}", position);
                 return FillResult.FAIL;
             }
+            copycat.notifyUpdate();
         } catch (RuntimeException exception) {
             RuntimeException rollbackFailure = rollbackMultistate(
                 level,
@@ -695,7 +693,6 @@ public final class CopycatMaterialFillingService {
             return FillResult.FAIL;
         }
 
-        copycat.notifyUpdate();
         return FillResult.SUCCESS;
     }
 
@@ -774,7 +771,8 @@ public final class CopycatMaterialFillingService {
             MountedItemTransactions.extractExact(
                 inventory,
                 stack -> ItemStack.isSameItemSameComponents(stack, filter),
-                count - prepaidUsed
+                count - prepaidUsed,
+                remainder -> refund(level, position, inventory, remainder)
             );
         if (additional.isEmpty()) {
             refund(level, position, inventory, prepaid.copyWithCount(prepaidUsed));

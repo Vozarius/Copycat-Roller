@@ -7,26 +7,111 @@ Release verification environment:
 - Gradle 8.14.3
 - Minecraft 1.21.1
 - NeoForge 21.1.219
-- Create 6
+- Create 6.0.10-281
 - Copycats+ 3.0.9
 
 ## Commands and results
 
 ```powershell
-.\gradlew.bat build --console=plain
-.\gradlew.bat runGameTestServer --console=plain
+.\gradlew.bat test build runGameTestServer --offline --console=plain --no-daemon
 ```
 
-The final version 2.0 build completed successfully. All 54 unit tests passed
+The final version 2.0 build completed successfully. All 61 unit tests passed
 with zero failures and zero errors. The dedicated NeoForge GameTest server
 loaded Copycat Roller 2.0, Create 6.0.10, and Copycats+ 3.0.9, then completed
-67 registered GameTests in 1.266 seconds with every required test passing.
+78 registered GameTests in 4.154 seconds: all 77 required tests passed.
 The Randomize Filters integration was reported as one optional failure because
-that optional mod was not installed; it is no longer counted as verified. The
+that optional mod was not installed; this automated run does not verify it. The
 server run also verifies that common code does not load client-only classes.
 
-The final clean build took 12 seconds; the dedicated GameTest run took
-34 seconds.
+The combined build, unit-test, and dedicated GameTest command took 44 seconds.
+This run reused Gradle caches; it was not a clean build.
+
+## Audit regression checks (2026-09-26)
+
+The epsilon-boundary permutation test failed before the planner fix. Five new
+GameTests also failed on the previous implementation: refused shape extraction,
+partial shape extraction, refused material extraction, and final notification
+failures for single-state and multistate Copycats. All now pass.
+
+Additional checks cover extreme fill depths at positive and negative world
+heights, bounded search arithmetic, combined prepaid/partial material refunds,
+and an extraction exception after debit when storage rejects the returned item.
+The latter must drop the finite remainder without placing a block. Expected
+exceptions are deliberately injected, so rollback error logs in these tests do
+not indicate a failed test. Existing Creative Crate and filled-Byte extension
+tests still pass.
+
+These checks do not establish compatibility with every declared dependency
+version or replace a moving-train client test. Randomize Filters remains untested
+in this automated environment because it is not installed. The user separately
+reports successful Randomize Filters and multiplayer checks on the previous
+build; those checks have not yet been repeated with the new gap fix.
+
+## Intermittent slope gaps (2026-09-26)
+
+A new GameTest uses real Create `TrackPaverV2` samples from both sides of a
+12-by-12-block Bezier quarter-turn. Before the fix, the first half-block band
+was disconnected: a staircase in the rasterized profile was mistaken for an
+open longitudinal end. After correcting that classification, moving windows
+still omitted two outer cells whose required support belonged to another core
+window. A separate unit test covers a same-band bridge skipped by one-pass
+coordinate ordering.
+
+The planner now includes the necessary support ancestors from the already
+bounded geometry. Halo samples cannot start independent output branches, and
+straight windows retain their original longitudinal bounds. Runtime placement
+uses a deterministic queue and propagates reach only after successful placement
+or an already-existing matching part. Failed placement stops that branch.
+
+The new regression verifies all 12 half-block bands are connected, and that
+short moving windows produce exactly the full contour, with neither missing nor
+extra cells, in forward and reversed window/sample order. Additional unit tests
+cover blocked support, duplicate cells, required halo ancestors, and empty core
+ownership. Existing world-placement, central-mask, payment, and idempotency tests
+continue to pass. The new curved-profile test validates planning and traversal;
+it does not drive a moving train or reproduce the user's saved world.
+
+Ordinary Create filling to the bottom is unchanged. The Copycat Byte Wide Fill
+safety cap remains unchanged. The user subsequently confirmed continuous
+curved slopes; the separate straight-track fix and retest are recorded below.
+
+## Straight-track gaps (2026-09-27)
+
+The user confirmed the latest curved slopes are continuous and reported gaps
+on axis-aligned straight track. A new regression reproduced loss of a core
+column at a straight graph-edge endpoint: for an eight-block +X edge, a Create
+window from 6.5 to 8 includes column X=8, while the clamped expanded window
+covers only X=0 through X=7. Create rounds the window length independently of
+its starting column. Previously the halo replaced the core sample list, so the
+side planner never saw the final writable column.
+
+`samplesWithHalo` now restores core samples missing from the expanded list.
+Existing halo samples keep their stable geometry; core ownership is unchanged.
+The preservation regression failed before this fix and now passes across +X,
+-X, +Z and -Z edges, lengths 8, 8.5 and 31, and window starts spaced by 0.125.
+A world-placement GameTest verifies every expected Byte on the endpoint strip
+is placed on the first call using finite zinc, and that repeating the call
+neither changes blocks nor consumes zinc or Byte change. Expected placement
+height comes from Create's own profile, including negative world heights.
+
+The curved-profile continuity regression still passes. The declared dependency
+ranges and Byte depth cap are unchanged as requested. Compatibility beyond the
+versions listed above is not established by this run. On 2026-09-27 the user
+confirmed that gaps no longer occur after receiving this artifact. This closes
+the outstanding gameplay confirmation for the reported straight-track issue.
+
+## Release assessment (2026-09-27)
+
+READY FOR RELEASE for the tested configuration: Minecraft 1.21.1, NeoForge
+21.1.219, Create 6.0.10-281, Copycats+ 3.0.9, and Java 21. No known blocking
+issue remains in that configuration after the successful automated checks and
+the user's confirmation that the reported gaps are gone. The declared wider
+dependency ranges remain unchanged at the user's request; this verdict does
+not certify every version combination in those ranges.
+
+This confirmation updates documentation only. The verified production JAR and
+its SHA-256 below are unchanged; no new build was necessary.
 
 ## Version 2.0 coverage
 
@@ -48,7 +133,8 @@ The new unit tests verify:
 - the nearest inward profile fixes a stable world-space outward normal;
 - station correspondence wins over a spatially nearer rounded cell from a
   different longitudinal section;
-- read-only halo seeds shape a complete contour but never own world output;
+- halo seeds shape the contour and supply only support ancestors required by
+  the current core; they cannot start independent output branches;
 - moving writable windows across a quarter-turn produce exactly the same cells
   as one monolithic contour, with every half-block distance band connected by
   shared faces; isolated diagonal contacts receive one inward corner bridge,
@@ -62,7 +148,8 @@ The new unit tests verify:
 - longitudinal-only or overlapping profile samples cannot invent a side;
 - straight profiles never extend beyond their two longitudinal ends;
 - only unsupported open ends are clipped while interior curve contours remain;
-- every planned Byte has a reachable predecessor in the prior height band;
+- every planned Byte has a reachable predecessor at the same height or one
+  half-block above;
 - every half-block distance band exists at its own height and a quarter-turn
   surface remains connected through the half-cell diagonal rasterization;
 - negative coordinates and a half-block track rise are rasterized correctly;
@@ -117,10 +204,10 @@ classloading.
 
 ## Artifacts
 
-- `build/libs/copycat_roller-2.0.jar` — 147,050 bytes
-  - SHA-256: `4B4DB5900300B89A6D5579B693797931726A424E8865992C6A96CE8FC6AE99EF`
-- `build/libs/copycat_roller-2.0-sources.jar` — 54,676 bytes
-  - SHA-256: `87AFD0FEC1D0BA11F2A8E50CC7625CD4076EFED491DD4606D4E26408DFDAAF45`
+- `build/libs/copycat_roller-2.0.jar` — 151,629 bytes
+  - SHA-256: `023D3662519453393BF6C197DE85CC69BF59535E66F153EA743B08EBCF144113`
+- `build/libs/copycat_roller-2.0-sources.jar` — 57,302 bytes
+  - SHA-256: `FF89E5F331137EAC99240D9309EBB814284252ED1D5A05C3BFEB8F9CA8BE81A1`
 
 The production JAR contains no GameTest classes or test structures. Its
 NeoForge metadata identifies only `copycat_roller`; the unrelated root

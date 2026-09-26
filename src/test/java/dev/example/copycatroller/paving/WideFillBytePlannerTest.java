@@ -435,6 +435,28 @@ class WideFillBytePlannerTest {
         );
     }
     @Test
+    void nearEqualMarginsAreIndependentOfEverySeedPermutation() {
+        for (double offset : new double[] {2.9e-8, 3e-8, 3.1e-8}) {
+            double a = Math.PI / 4 + offset;
+            double b = Math.PI / 4 + 2 * offset;
+            var seeds = List.of(
+                new WideFillBytePlanner.Seed(1, 0, 0, Math.cos(a), Math.sin(a), false, true, true),
+                new WideFillBytePlanner.Seed(1, 0, 0, Math.cos(b), Math.sin(b), false, false, false),
+                new WideFillBytePlanner.Seed(0, 1, 1, Math.cos(a), Math.sin(a), false, false, false)
+            );
+            var expected = WideFillBytePlanner.plan(seeds, 3);
+            for (int first = 0; first < 3; first++) {
+                for (int second = 0; second < 3; second++) {
+                    if (first == second) continue;
+                    assertEquals(expected, WideFillBytePlanner.plan(List.of(
+                        seeds.get(first), seeds.get(second), seeds.get(3 - first - second)
+                    ), 3));
+                }
+            }
+        }
+    }
+
+    @Test
     void reachMatchesCreatesWideFillRadius() {
         assertEquals(0, WideFillBytePlanner.reachBlocksForCreateDepth(0));
         assertEquals(1, WideFillBytePlanner.reachBlocksForCreateDepth(1));

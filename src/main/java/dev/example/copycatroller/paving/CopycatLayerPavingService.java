@@ -771,7 +771,10 @@ public final class CopycatLayerPavingService {
             MountedItemTransactions.extractExact(
                 inventory,
                 material.itemPredicate(),
-                itemCost
+                itemCost,
+                remainder -> CopycatMaterialFillingService.refundObservedExtraction(
+                    level, position, inventory, remainder
+                )
             );
         if (extraction.isEmpty()) {
             return Optional.empty();
@@ -816,7 +819,10 @@ public final class CopycatLayerPavingService {
             MountedItemTransactions.extractExact(
                 inventory,
                 CopycatPavingMaterial.HALF_LAYER.itemPredicate(),
-                plan.halfLayersToConsume()
+                plan.halfLayersToConsume(),
+                remainder -> CopycatMaterialFillingService.refundObservedExtraction(
+                    level, position, inventory, remainder
+                )
             );
         if (halfLayerExtraction.isEmpty()) {
             return Optional.empty();
@@ -828,7 +834,10 @@ public final class CopycatLayerPavingService {
             MountedItemTransactions.extractExact(
                 inventory,
                 CopycatLayerPavingService::isZincIngot,
-                plan.zincIngotsToConsume()
+                plan.zincIngotsToConsume(),
+                remainder -> CopycatMaterialFillingService.refundObservedExtraction(
+                    level, position, inventory, remainder
+                )
             );
         if (zincExtraction.isEmpty()) {
             refundExtraction(
@@ -911,7 +920,10 @@ public final class CopycatLayerPavingService {
             MountedItemTransactions.extractExact(
                 inventory,
                 CopycatPavingMaterial.BYTE.itemPredicate(),
-                plan.bytesToConsume()
+                plan.bytesToConsume(),
+                remainder -> CopycatMaterialFillingService.refundObservedExtraction(
+                    level, position, inventory, remainder
+                )
             );
         if (byteExtraction.isEmpty()) {
             return Optional.empty();
@@ -923,7 +935,10 @@ public final class CopycatLayerPavingService {
             MountedItemTransactions.extractExact(
                 inventory,
                 CopycatLayerPavingService::isZincIngot,
-                plan.zincIngotsToConsume()
+                plan.zincIngotsToConsume(),
+                remainder -> CopycatMaterialFillingService.refundObservedExtraction(
+                    level, position, inventory, remainder
+                )
             );
         if (zincExtraction.isEmpty()) {
             refundExtraction(

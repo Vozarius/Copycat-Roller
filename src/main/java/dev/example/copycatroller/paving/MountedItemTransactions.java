@@ -3,9 +3,11 @@ package dev.example.copycatroller.paving;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import com.simibubi.create.foundation.item.ItemHelper;
+import dev.example.copycatroller.CopycatRoller;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.IItemHandler;
 
@@ -24,7 +26,8 @@ final class MountedItemTransactions {
     static Optional<Extraction> extractExact(
         IItemHandler inventory,
         Predicate<ItemStack> predicate,
-        int count
+        int count,
+        Consumer<ItemStack> returnRemainder
     ) {
         if (count < 0) {
             throw new IllegalArgumentException("count must not be negative");
@@ -39,14 +42,36 @@ final class MountedItemTransactions {
         }
 
         List<ItemStack> before = snapshot(inventory);
-        ItemStack extracted = ItemHelper.extract(inventory, predicate, count, false);
-        int finiteCount = observedLoss(before, inventory, extracted);
-        Extraction result = new Extraction(extracted.copy(), finiteCount);
-        if (extracted.getCount() != count) {
-            result.rollback(inventory);
+        int extractedCount = 0;
+        boolean complete = true;
+        try {
+            for (int slot = 0; slot < inventory.getSlots() && extractedCount < count; slot++) {
+                int remaining = count - extractedCount;
+                ItemStack offer = inventory.extractItem(slot, remaining, true);
+                if (offer.isEmpty() || !ItemStack.isSameItemSameComponents(offer, simulated)) {
+                    continue;
+                }
+                int requested = Math.min(remaining, offer.getCount());
+                // ItemHelper's real extraction ignores this return value. A
+                // successful simulation is not proof of a successful payment.
+                ItemStack actual = inventory.extractItem(slot, requested, false);
+                if (actual.getCount() != requested
+                    || !ItemStack.isSameItemSameComponents(actual, simulated)) {
+                    complete = false;
+                    break;
+                }
+                extractedCount += actual.getCount();
+            }
+        } catch (RuntimeException exception) {
+            complete = false;
+            CopycatRoller.LOGGER.error("Mounted item extraction failed; restoring observed losses", exception);
+        }
+        if (!complete || extractedCount != count) {
+            restoreObservedLosses(before, inventory, returnRemainder);
             return Optional.empty();
         }
-        return Optional.of(result);
+        ItemStack extracted = simulated.copyWithCount(extractedCount);
+        return Optional.of(new Extraction(extracted, observedLoss(before, inventory, extracted)));
     }
 
     static Insertion insertDurably(IItemHandler inventory, ItemStack stack) {
@@ -68,6 +93,29 @@ final class MountedItemTransactions {
             remaining.shrink(added);
         }
         return new Insertion(List.copyOf(inserted), remaining);
+    }
+
+    private static void restoreObservedLosses(
+        List<ItemStack> before,
+        IItemHandler inventory,
+        Consumer<ItemStack> returnRemainder
+    ) {
+        List<ItemStack> restored = new ArrayList<>();
+        for (ItemStack stack : before) {
+            if (stack.isEmpty() || restored.stream().anyMatch(
+                other -> ItemStack.isSameItemSameComponents(other, stack)
+            )) {
+                continue;
+            }
+            restored.add(stack);
+            // Only finite losses are refunded. Creative Crates return real
+            // extracted items without reducing their visible stock.
+            int lost = observedLoss(before, inventory, stack.copyWithCount(Integer.MAX_VALUE));
+            if (lost > 0) {
+                ItemStack remainder = insertDurably(inventory, stack.copyWithCount(lost)).remainder();
+                if (!remainder.isEmpty()) returnRemainder.accept(remainder);
+            }
+        }
     }
 
     private static List<ItemStack> snapshot(IItemHandler inventory) {

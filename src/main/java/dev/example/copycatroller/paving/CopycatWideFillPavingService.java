@@ -1,7 +1,6 @@
 package dev.example.copycatroller.paving;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -14,7 +13,6 @@ import dev.example.copycatroller.paving.CopycatLayerPavingService.PlacementResul
 import dev.example.copycatroller.paving.PreciseTrackHeightSampler.ProfileWindow;
 import dev.example.copycatroller.paving.RollerEdgeSelection.EdgeSides;
 import dev.example.copycatroller.paving.WideFillBytePlanner.ByteCell;
-import dev.example.copycatroller.paving.WideFillBytePlanner.HalfVoxel;
 import dev.example.copycatroller.paving.WideFillBytePlanner.Seed;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -53,30 +51,25 @@ public final class CopycatWideFillPavingService {
             return false;
         }
         IItemHandler inventory = context.contraption.getStorage().getAllItems();
-        Set<HalfVoxel> reached = new HashSet<>(
-            WideFillBytePlanner.seedVoxels(plan.seeds())
+        boolean[] changed = {false};
+        WideFillTraversal.visitReachable(
+            WideFillBytePlanner.seedVoxels(plan.seeds()),
+            plan.cells(),
+            cell -> {
+                BlockPos position = blockPosition(cell);
+                CopycatByteBlock.Byte bite = byteForCell(cell);
+                PlacementResult result = CopycatLayerPavingService.tryPlaceWithZinc(
+                    context.world,
+                    position,
+                    CopycatPavingMaterial.BYTE,
+                    CopycatLayerPavingService.byteStateFor(Set.of(bite)),
+                    inventory
+                );
+                changed[0] |= result == PlacementResult.SUCCESS;
+                return result != PlacementResult.FAIL;
+            }
         );
-        boolean changed = false;
-        for (ByteCell cell : plan.cells()) {
-            if (!hasReachableParent(cell, reached)) {
-                continue;
-            }
-
-            BlockPos position = blockPosition(cell);
-            CopycatByteBlock.Byte bite = byteForCell(cell);
-            PlacementResult result = CopycatLayerPavingService.tryPlaceWithZinc(
-                context.world,
-                position,
-                CopycatPavingMaterial.BYTE,
-                CopycatLayerPavingService.byteStateFor(Set.of(bite)),
-                inventory
-            );
-            if (result != PlacementResult.FAIL) {
-                reached.add(cell.voxel());
-            }
-            changed |= result == PlacementResult.SUCCESS;
-        }
-        return changed;
+        return changed[0];
     }
 
     private static PavingPlan planned(
@@ -393,28 +386,6 @@ public final class CopycatWideFillPavingService {
             0,
             0
         );
-    }
-
-    private static boolean hasReachableParent(
-        ByteCell cell,
-        Set<HalfVoxel> reached
-    ) {
-        for (int offsetX = -1; offsetX <= 1; offsetX++) {
-            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                for (int parentY = cell.lowerHalfY();
-                     parentY <= cell.lowerHalfY() + 1;
-                     parentY++) {
-                    if (reached.contains(new HalfVoxel(
-                        cell.halfX() + offsetX,
-                        parentY,
-                        cell.halfZ() + offsetZ
-                    ))) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     private record PavingPlan(List<Seed> seeds, List<ByteCell> cells) {

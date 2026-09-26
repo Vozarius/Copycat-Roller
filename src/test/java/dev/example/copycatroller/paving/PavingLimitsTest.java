@@ -31,6 +31,20 @@ class PavingLimitsTest {
     }
 
     @Test
+    void surfaceSearchRemainsBoundedForExtremeGapsAndWorldHeights() {
+        for (int configured : new int[] {12, 32, Integer.MAX_VALUE - 1, Integer.MAX_VALUE}) {
+            int depth = PavingLimits.surfaceSearchDepth(configured, configured + 1.0);
+            assertEquals(Math.min(configured, 32) + 1, depth);
+            for (int centerY : new int[] {-63, -32, 0, 65, 319}) {
+                long firstY = (long) centerY - depth;
+                assertEquals(depth + 1L, centerY - firstY + 1);
+            }
+            assertEquals(2, PavingLimits.surfaceSearchDepth(configured, 1.0));
+        }
+        assertEquals(33, PavingLimits.surfaceSearchDepth(Integer.MAX_VALUE, Double.MAX_VALUE));
+    }
+
+    @Test
     void rejectsInvalidValues() {
         assertThrows(
             IllegalArgumentException.class,

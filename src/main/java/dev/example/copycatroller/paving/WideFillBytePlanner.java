@@ -13,7 +13,8 @@ import java.util.Set;
  * Rasterizes selected lateral Wide Fill surfaces on the Copycat Byte grid.
  * The union of every Roller profile defines the protected centre and only its
  * real exterior boundary may emit. Each output column is owned by its nearest
- * track sample; read-only halo sources shape the field but never own output.
+ * track sample; halo sources shape the field and supply only the support
+ * ancestors required by the current core, without starting output branches.
  */
 public final class WideFillBytePlanner {
     private static final double HALF_GRID_EPSILON = 1.0e-7;
@@ -137,32 +138,21 @@ public final class WideFillBytePlanner {
         }
 
         Set<ByteCell> output = new LinkedHashSet<>();
+        Set<ByteCell> geometry = new LinkedHashSet<>();
         for (Map.Entry<HalfColumn, NearestSource> entry : selected.entrySet()) {
             HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
-            if (!owner.source().outputOwner()) {
-                continue;
-            }
-            output.add(new ByteCell(
-                column.x(),
-                outputLowerHalfY(owner),
-                column.z(),
-                owner.distance()
-            ));
+            ByteCell cell = new ByteCell(
+                column.x(), outputLowerHalfY(owner), column.z(), owner.distance()
+            );
+            geometry.add(cell);
+            if (owner.source().outputOwner()) output.add(cell);
         }
-        closeDiagonalGaps(output, selected, allowed);
+        closeDiagonalGaps(output, geometry, selected, allowed);
 
-        List<ByteCell> ordered = new ArrayList<>(output);
-        ordered.sort((left, right) -> {
-            int comparison = Integer.compare(left.distance(), right.distance());
-            if (comparison != 0) return comparison;
-            comparison = Integer.compare(left.halfX(), right.halfX());
-            if (comparison != 0) return comparison;
-            comparison = Integer.compare(left.halfZ(), right.halfZ());
-            if (comparison != 0) return comparison;
-            return Integer.compare(left.lowerHalfY(), right.lowerHalfY());
-        });
-        return List.copyOf(ordered);
+        return WideFillTraversal.includeRequiredSupports(
+            seedVoxels(seeds), List.copyOf(geometry), output
+        );
     }
 
     /**
@@ -171,14 +161,16 @@ public final class WideFillBytePlanner {
      * Bridge only those same-height, same-distance corner pairs, choosing an
      * already outward-allowed orthogonal cell nearest to the centre mask.
      */
-    private static void closeDiagonalGaps(        Set<ByteCell> output,
+    private static void closeDiagonalGaps(
+        Set<ByteCell> output,
+        Set<ByteCell> geometry,
         Map<HalfColumn, NearestSource> selected,
         Map<HalfColumn, NearestSource> allowed
     ) {
-        List<Map.Entry<HalfColumn, NearestSource>> owners = selected.entrySet()
-            .stream()
-            .filter(entry -> entry.getValue().source().outputOwner())
-            .toList();
+        // Build the complete geometry before choosing the support ancestors
+        // needed by the core. Halo bridges do not own output themselves.
+        List<Map.Entry<HalfColumn, NearestSource>> owners =
+            new ArrayList<>(selected.entrySet());
         for (Map.Entry<HalfColumn, NearestSource> entry : owners) {
             HalfColumn column = entry.getKey();
             NearestSource owner = entry.getValue();
@@ -215,12 +207,11 @@ public final class WideFillBytePlanner {
                         allowed
                     );
                     if (bridge != null) {
-                        output.add(new ByteCell(
-                            bridge.x(),
-                            lowerHalfY,
-                            bridge.z(),
-                            distance
-                        ));
+                        ByteCell cell = new ByteCell(bridge.x(), lowerHalfY, bridge.z(), distance);
+                        geometry.add(cell);
+                        if (owner.source().outputOwner() || diagonal.source().outputOwner()) {
+                            output.add(cell);
+                        }
                     }
                 }
             }
@@ -375,17 +366,23 @@ public final class WideFillBytePlanner {
             if (!sharesEmittingSide(source, candidate)) {
                 continue;
             }
-            int offsetX = candidate.column().x() - source.column().x();
-            int offsetZ = candidate.column().z() - source.column().z();
-            double along = (
-                offsetX * -source.normalZ()
-                    + offsetZ * source.normalX()
+            // Continuation belongs to neighbouring raster columns, not to
+            // one particular pair of half voxels. At a stair-step in a curve,
+            // the old lateral-distance test mistook the next column for an
+            // open end and clipped a complete strip of the slope.
+            int blockOffsetX = Math.floorDiv(candidate.column().x(), 2)
+                - Math.floorDiv(source.column().x(), 2);
+            int blockOffsetZ = Math.floorDiv(candidate.column().z(), 2)
+                - Math.floorDiv(source.column().z(), 2);
+            if (Math.abs(blockOffsetX) > 1 || Math.abs(blockOffsetZ) > 1
+                || blockOffsetX == 0 && blockOffsetZ == 0) {
+                continue;
+            }
+            double along = 2 * (
+                blockOffsetX * -source.normalZ()
+                    + blockOffsetZ * source.normalX()
             ) * direction;
-            double side = offsetX * source.normalX()
-                + offsetZ * source.normalZ();
-            if (along > 0.5 - HALF_GRID_EPSILON
-                && along <= 2.5 + HALF_GRID_EPSILON
-                && Math.abs(side) <= 1.5 + HALF_GRID_EPSILON) {
+            if (along > 0.5 - HALF_GRID_EPSILON) {
                 return true;
             }
         }
@@ -479,19 +476,21 @@ public final class WideFillBytePlanner {
         NearestSource current,
         NearestSource candidate
     ) {
-        if (Math.abs(candidate.squaredDistance() - current.squaredDistance())
-            > HALF_GRID_EPSILON) {
-            return candidate.squaredDistance() < current.squaredDistance()
-                ? candidate
-                : current;
+        // Distance is an exact integer on the half grid. Quantize each margin
+        // independently: pairwise epsilon equality is not transitive and makes
+        // a three-source merge depend on the input order.
+        int comparison = Double.compare(candidate.squaredDistance(), current.squaredDistance());
+        if (comparison != 0) {
+            return comparison < 0 ? candidate : current;
         }
-        if (Math.abs(candidate.lateralMargin() - current.lateralMargin())
-            > HALF_GRID_EPSILON) {
-            return candidate.lateralMargin() > current.lateralMargin()
-                ? candidate
-                : current;
+        comparison = Long.compare(
+            Math.round(candidate.lateralMargin() / HALF_GRID_EPSILON),
+            Math.round(current.lateralMargin() / HALF_GRID_EPSILON)
+        );
+        if (comparison != 0) {
+            return comparison > 0 ? candidate : current;
         }
-        int comparison = Integer.compare(
+        comparison = Integer.compare(
             candidate.source().lowerHalfY(),
             current.source().lowerHalfY()
         );
@@ -500,16 +499,10 @@ public final class WideFillBytePlanner {
         }
 
         // Equal-distance Voronoi boundaries must not depend on seed order.
-        // Prefer a source that can actually emit towards this cell, then a
-        // writable core owner, and finally a stable geometric key.
+        // Prefer a source that can actually emit towards this cell, then its
+        // stable geometry. Core/halo ownership only breaks identical-source
+        // ties; otherwise moving the core would change the contour itself.
         comparison = Boolean.compare(canEmitTowards(candidate), canEmitTowards(current));
-        if (comparison != 0) {
-            return comparison > 0 ? candidate : current;
-        }
-        comparison = Boolean.compare(
-            candidate.source().outputOwner(),
-            current.source().outputOwner()
-        );
         if (comparison != 0) {
             return comparison > 0 ? candidate : current;
         }

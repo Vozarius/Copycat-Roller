@@ -170,10 +170,23 @@ public final class PreciseTrackHeightSampler {
                 );
             }
         }
-        return new ProfileWindow(
-            samples(expanded, rollerLocalY),
-            Set.copyOf(coreColumns)
-        );
+        List<TrackSurfaceSample> expandedSamples = new ArrayList<>(samples(expanded, rollerLocalY));
+        Set<Long> expandedColumns = new HashSet<>();
+        for (TrackSurfaceSample sample : expandedSamples) {
+            expandedColumns.add(columnId(sample.x(), sample.z()));
+        }
+        // Create rounds a straight window's length independently of its start.
+        // Near an edge endpoint a short core can include a column absent from
+        // the longer, clamped halo. Expansion must never discard that core.
+        // Retain the halo's stable geometry wherever it already has a sample.
+        for (TrackSurfaceSample sample : coreSamples) {
+            if (expandedColumns.add(columnId(sample.x(), sample.z()))) {
+                expandedSamples.add(sample);
+            }
+        }
+        expandedSamples.sort(Comparator.comparingInt(TrackSurfaceSample::x)
+            .thenComparingInt(TrackSurfaceSample::z));
+        return new ProfileWindow(expandedSamples, Set.copyOf(coreColumns));
     }
 
     private static int captureCount(PaveTask task) {
